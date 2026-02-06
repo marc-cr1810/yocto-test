@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+import os
+import sys
+import re
+from pathlib import Path
+
+# Special case mappings (only for packages that don't follow the lowercase convention)
+CMAKE_TO_YOCTO_MAP = {
+    "OpenSSL": "openssl",
+    "ZLIB": "zlib",
+    "GTest": "googletest",
+    "Protobuf": "protobuf",
+    "CURL": "curl",
+    "SQLite3": "sqlite3",
+    "Threads": "",  # Built-in to toolchain
+}
+
+def detect_dependencies(project_dir, workspace_root):
+    deps = set()
+    cmake_lists = project_dir / "CMakeLists.txt"
+    if cmake_lists.exists():
+        with open(cmake_lists, "r") as f:
+            content = f.read()
+            
+            # Find common CMake find_package calls
+            matches = re.findall(r"find_package\s*\(\s*(\w+)", content, re.IGNORECASE)
+            for m in matches:
+                # Check if it's in the special case map
+                if m in CMAKE_TO_YOCTO_MAP:
+                    yocto_dep = CMAKE_TO_YOCTO_MAP[m]
+                    if yocto_dep:  # Skip empty strings (like Threads)
+                        deps.add(yocto_dep)
+                else:
+                    # Check if it's an internal dependency (another project in sw/)
+                    sw_dir = workspace_root / "sw"
+                    if (sw_dir / m.lower()).exists():
+                        deps.add(m.lower())
+                    else:
+                        # Default: convert to lowercase (most packages follow this convention)
+                        # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
+                        deps.add(m.lower())
+    return sorted(list(filter(None, deps)))
+
+def update_recipe(recipe_file, new_deps):
+    if not recipe_file.exists():
+        return False
+    
+    with open(recipe_file, "r") as f:
+        lines = f.readlines()
+    
+    new_deps_str = f'DEPENDS = "{" ".join(new_deps)}"\n'
+    updated = False
+    new_lines = []
+    depends_found = False
+    
+    for line in lines:
+        if line.startswith("DEPENDS ="):
+            if not updated and new_deps:
+                new_deps_str_old = line
+                if new_deps_str != new_deps_str_old:
+                    new_lines.append(new_deps_str)
+                    updated = True
+                else:
+                    new_lines.append(line)
+            depends_found = True
+        else:
+            new_lines.append(line)
+            
+    # If no DEPENDS was found but we have deps to add
+    if not depends_found and new_deps:
+        # Find a good place to insert (after LICENSE)
+        insert_idx = -1
+        for i, line in enumerate(new_lines):
+            if line.startswith("LICENSE ="):
+                insert_idx = i + 1
+                break
+        
+        if insert_idx != -1:
+            new_lines.insert(insert_idx, "\n" + new_deps_str)
+            updated = True
+        else:
+            new_lines.insert(0, new_deps_str + "\n")
+            updated = True
+
+    if updated:
+        with open(recipe_file, "w") as f:
+            f.writelines(new_lines)
+        return True
+    return False
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Synchronize CMake dependencies with Yocto recipes")
+    parser.add_argument("--layer", default=None, help="Layer name to use (default: auto-detect)")
+    args = parser.parse_args()
+
+    # ANSI Colors
+    BOLD = '\033[1m'
+    CYAN = '\033[0;36m'
+    GREEN = '\033[0;32m'
+    RED = '\033[0;31m'
+    NC = '\033[0m'
+
+    workspace_root = Path(__file__).resolve().parent.parent
+    sw_dir = workspace_root / "sw"
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    
+    # Smart layer detection
+    if args.layer:
+        from yocto_utils import find_custom_layer
+        layer_dir = find_custom_layer(workspace_root, args.layer)
+    else:
+        from yocto_utils import get_all_custom_layers, get_cached_layer
+        
+        cached_layer = get_cached_layer(workspace_root)
+        all_layers = get_all_custom_layers(workspace_root)
+        
+        if not all_layers:
+            print(f"{BOLD}{RED}Error: No custom layers found.{NC}")
+            print(f"  Run '{GREEN}yocto-layers --new <name>{NC}' to create a layer first.")
+            sys.exit(1)
+        
+        if len(all_layers) == 1:
+            # Single layer - auto-select
+            layer_dir = all_layers[0]
+        elif cached_layer:
+            # Use cached layer
+            layer_dir = workspace_root / "yocto" / "layers" / cached_layer
+        else:
+            # Multiple layers, use first one
+            layer_dir = all_layers[0]
+    
+    print(f"{BOLD}{CYAN}=================================================={NC}")
+    print(f"{BOLD}{CYAN}   Synchronizing Workspace Dependencies{NC}")
+    print(f"{BOLD}{CYAN}=================================================={NC}")
+    print(f"  Layer        : {BOLD}{layer_dir.name}{NC}")
+    
+    updated_count = 0
+    for project_dir in sw_dir.iterdir():
+        if project_dir.is_dir():
+            project_name = project_dir.name
+            # Find the recipe
+            recipe_file = None
+            for r in layer_dir.rglob(f"{project_name}_*.bb"):
+                recipe_file = r
+                break
+            
+            if not recipe_file:
+                continue
+                
+            detected_deps = detect_dependencies(project_dir, workspace_root)
+            if update_recipe(recipe_file, detected_deps):
+                print(f"  {GREEN}[UPDATED]{NC} {project_name:15} -> {', '.join(detected_deps)}")
+                updated_count += 1
+            else:
+                print(f"  [ OK ]    {project_name:15}")
+                
+    print(f"\n{GREEN}Done. Updated {updated_count} recipes.{NC}")
+    print(f"{BOLD}{CYAN}=================================================={NC}")
+
+if __name__ == "__main__":
+    main()

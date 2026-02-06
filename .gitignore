@@ -1,0 +1,27 @@
+# Yocto / BitBake Build Artifacts
+bitbake-builds/
+bitbake-cookerdaemon.log
+build/
+cache/
+oe-logs/
+oe-workdir/
+.bitbake-*
+.yocto-cache/
+
+# General Build Artifacts
+*.log
+*.log.*
+*_log.*
+*.tmp
+*.cache
+*.cache.*
+oe-logs
+oe-workdir
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.DS_Store

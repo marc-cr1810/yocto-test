@@ -1,0 +1,35 @@
+{
+    "C_Cpp.files.exclude": {
+        "bitbake-builds/**": true,
+        "**/.vscode": true,
+        "**/.vs": true
+    },
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}/sources/poky/bitbake/lib",
+        "${workspaceFolder}/sources/poky/meta/lib",
+        "${workspaceFolder}/bitbake-builds/poky-master/layers/bitbake/lib",
+        "${workspaceFolder}/bitbake-builds/poky-master/layers/meta/lib"
+    ],
+    "files.associations": {
+        "*.embeddedhtml": "html",
+        "*.conf": "bitbake",
+        "*.inc": "bitbake"
+    },
+    "bitbake.pathToBitbakeFolder": "${workspaceFolder}/bitbake-builds/poky-master/layers/bitbake",
+    "bitbake.pathToEnvScript": "${workspaceFolder}/bitbake-builds/poky-master/build/init-build-env",
+    "bitbake.sdkImage": "core-image-minimal",
+    "terminal.integrated.profiles.linux": {
+        "Yocto Environment": {
+            "path": "bash",
+            "args": [
+                "--rcfile",
+                "${workspaceFolder}/.vscode/yocto-term-init.sh"
+            ]
+        }
+    },
+    "terminal.integrated.defaultProfile.linux": "Yocto Environment",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/bitbake-builds/poky-master/layers/bitbake/lib",
+        "${workspaceFolder}/bitbake-builds/poky-master/layers/meta/lib"
+    ]
+}

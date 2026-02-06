@@ -1,0 +1,13 @@
+[
+    {
+        "name": "Yocto Toolchain",
+        "compilers": {
+            "C": "/home/marc/proj/yocto-test/bitbake-builds/poky-master/build/tmp/sysroots-components/x86_64/gcc-cross-aarch64/usr/bin/aarch64-poky-linux/aarch64-poky-linux-gcc",
+            "CXX": "/home/marc/proj/yocto-test/bitbake-builds/poky-master/build/tmp/sysroots-components/x86_64/gcc-cross-aarch64/usr/bin/aarch64-poky-linux/aarch64-poky-linux-g++"
+        },
+        "toolchainFile": "",
+        "cmakeSettings": {
+            "CMAKE_SYSROOT": "/home/marc/proj/yocto-test/bitbake-builds/poky-master/build/tmp/work/qemuarm64-poky-linux/linux-yocto/6.18.6+git/recipe-sysroot"
+        }
+    }
+]
