@@ -78,31 +78,20 @@ def detect_rust_dependencies(project_dir):
     return sorted(list(deps))
 
 def detect_go_dependencies(project_dir):
-    """Detect Go dependencies from go.mod"""
-    deps = set()
+    """Detect Go module path from go.mod
+    
+    Note: Go dependencies are NOT added to DEPENDS as the Go build system
+    handles module dependencies automatically during build.
+    """
     go_mod = project_dir / "go.mod"
     if go_mod.exists():
         with open(go_mod, "r") as f:
             content = f.read()
-            # Find require statements - handle both single line and multi-line blocks
-            # Single line: require github.com/user/package v1.0.0
-            single_matches = re.findall(r'^\s*require\s+([^\s]+)', content, re.MULTILINE)
-            # Multi-line block: require ( ... )
-            block_match = re.search(r'require\s*\((.*?)\)', content, re.DOTALL)
-            if block_match:
-                block_content = block_match.group(1)
-                # Match package paths (must contain /)
-                block_matches = re.findall(r'^\s*([^\s]+/[^\s]+)', block_content, re.MULTILINE)
-                single_matches.extend(block_matches)
-            
-            for dep in single_matches:
-                # Filter out non-package entries
-                if '/' in dep:
-                    # Extract package name from full path
-                    # e.g., github.com/user/package -> package
-                    pkg_name = dep.split('/')[-1]
-                    deps.add(pkg_name)
-    return sorted(list(deps))
+            # Extract module name from first line: module github.com/user/project
+            match = re.search(r'^module\s+(\S+)', content, re.MULTILINE)
+            if match:
+                return match.group(1)
+    return None
 
 def detect_python_dependencies(project_dir):
     """Detect Python dependencies from setup.py or pyproject.toml"""
@@ -261,12 +250,15 @@ def main():
 
     # Detect dependencies based on project type
     detected_deps = []
+    go_module_path = None
     if project_type in ["cpp", "cmake"]:
         detected_deps = detect_dependencies(project_dir, workspace_root, layer_dir)
     elif project_type == "rust":
         detected_deps = detect_rust_dependencies(project_dir)
     elif project_type == "go":
-        detected_deps = detect_go_dependencies(project_dir)
+        go_module_path = detect_go_dependencies(project_dir)
+        if go_module_path:
+            print(f"  Go Module    : {go_module_path}")
     elif project_type == "python":
         detected_deps = detect_python_dependencies(project_dir)
     
@@ -365,6 +357,7 @@ EXTERNALSRC_BUILD = "${{WORKDIR}}/build"
 
     # Go specific recipe
     elif project_type == "go":
+        go_import = go_module_path if go_module_path else project_name
         recipe_content = f"""SUMMARY = "{project_name} Go application"
 {license_text}
 
@@ -374,9 +367,34 @@ EXTERNALSRC_BUILD = "${{WORKDIR}}/build"
 inherit externalsrc
 EXTERNALSRC = "${{THISDIR}}/{rel_project_path}"
 
-GO_IMPORT = "{project_name}"
+GO_IMPORT = "{go_import}"
+GO_INSTALL = "${{GO_IMPORT}}/..."
 
-{depends_str}
+# Remove -buildmode=pie to fix unique.Handle linker errors on some toolchains
+GOBUILDFLAGS:remove = "-buildmode=pie"
+INSANE_SKIP:${{PN}} += "textrel"
+
+# Override compile task to work with externalsrc and Go modules
+do_compile() {{
+    cd ${{EXTERNALSRC}}
+    export TMPDIR="${{GOTMPDIR}}"
+    export GO111MODULE="on"
+    ${{GO}} install ${{GO_LINKSHARED}} ${{GOBUILDFLAGS}} ${{GO_INSTALL}}
+}}
+
+# Custom install for externalsrc Go projects (skips source install)
+do_install() {{
+    install -d ${{D}}${{bindir}}
+    # Check for binaries in standard Go build locations
+    if [ -d ${{B}}/bin/${{TARGET_GOOS}}_${{TARGET_GOARCH}} ]; then
+        install -m 0755 ${{B}}/bin/${{TARGET_GOOS}}_${{TARGET_GOARCH}}/* ${{D}}${{bindir}}/
+    elif [ -d ${{B}}/bin ]; then
+        install -m 0755 ${{B}}/bin/* ${{D}}${{bindir}}/
+    fi
+}}
+
+# Allow network access for Go module downloads
+do_compile[network] = "1"
 """
 
     # Python specific recipe
