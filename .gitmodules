@@ -1,0 +1,3 @@
+[submodule "/home/marc/proj/yocto-test/submodules/spdlog"]
+	path = /home/marc/proj/yocto-test/submodules/spdlog
+	url = https://github.com/gabime/spdlog.git

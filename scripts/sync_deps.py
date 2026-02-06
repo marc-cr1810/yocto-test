@@ -15,7 +15,7 @@ CMAKE_TO_YOCTO_MAP = {
     "Threads": "",  # Built-in to toolchain
 }
 
-def detect_dependencies(project_dir, workspace_root):
+def detect_dependencies(project_dir, workspace_root, layer_dir=None):
     deps = set()
     cmake_lists = project_dir / "CMakeLists.txt"
     if cmake_lists.exists():
@@ -32,13 +32,27 @@ def detect_dependencies(project_dir, workspace_root):
                         deps.add(yocto_dep)
                 else:
                     # Check if it's an internal dependency (another project in sw/)
+                    # Search across all language directories
                     sw_dir = workspace_root / "sw"
-                    if (sw_dir / m.lower()).exists():
-                        deps.add(m.lower())
-                    else:
-                        # Default: convert to lowercase (most packages follow this convention)
-                        # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
-                        deps.add(m.lower())
+                    found = False
+                    for lang_dir in ["cpp", "rust", "go", "python", "module"]:
+                        if (sw_dir / lang_dir / m.lower()).exists():
+                            deps.add(m.lower())
+                            found = True
+                            break
+                    
+                    if not found:
+                        # Check if a recipe exists for this dependency in the layer
+                        if layer_dir:
+                            recipe_pattern = f"{m.lower()}_*.bb"
+                            if list(layer_dir.rglob(recipe_pattern)):
+                                deps.add(m.lower())
+                                found = True
+                        
+                        if not found:
+                            # Default: convert to lowercase (most packages follow this convention)
+                            # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
+                            deps.add(m.lower())
     return sorted(list(filter(None, deps)))
 
 def update_recipe(recipe_file, new_deps):
@@ -136,24 +150,28 @@ def main():
     print(f"  Layer        : {BOLD}{layer_dir.name}{NC}")
     
     updated_count = 0
-    for project_dir in sw_dir.iterdir():
-        if project_dir.is_dir():
-            project_name = project_dir.name
-            # Find the recipe
-            recipe_file = None
-            for r in layer_dir.rglob(f"{project_name}_*.bb"):
-                recipe_file = r
-                break
+    # Recursively scan all subdirectories in sw/ including language-specific folders
+    for project_dir in sw_dir.rglob("CMakeLists.txt"):
+        project_dir = project_dir.parent
+        # Get the project name relative to sw/ to handle nested structures
+        rel_path = project_dir.relative_to(sw_dir)
+        project_name = rel_path.name if len(rel_path.parts) == 1 else rel_path.parts[-1]
+        
+        # Find the recipe
+        recipe_file = None
+        for r in layer_dir.rglob(f"{project_name}_*.bb"):
+            recipe_file = r
+            break
+        
+        if not recipe_file:
+            continue
             
-            if not recipe_file:
-                continue
-                
-            detected_deps = detect_dependencies(project_dir, workspace_root)
-            if update_recipe(recipe_file, detected_deps):
-                print(f"  {GREEN}[UPDATED]{NC} {project_name:15} -> {', '.join(detected_deps)}")
-                updated_count += 1
-            else:
-                print(f"  [ OK ]    {project_name:15}")
+        detected_deps = detect_dependencies(project_dir, workspace_root, layer_dir)
+        if update_recipe(recipe_file, detected_deps):
+            print(f"  {GREEN}[UPDATED]{NC} {project_name:15} -> {', '.join(detected_deps)}")
+            updated_count += 1
+        else:
+            print(f"  [ OK ]    {project_name:15}")
                 
     print(f"\n{GREEN}Done. Updated {updated_count} recipes.{NC}")
     print(f"{BOLD}{CYAN}=================================================={NC}")

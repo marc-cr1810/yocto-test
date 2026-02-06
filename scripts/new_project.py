@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scaffold a new project (C++, Rust, Go, Python, or Kernel Module) and add it to Yocto")
     parser.add_argument("name", help="Name of the new project")
     parser.add_argument("--layer", default=None, help="Target Yocto layer (default: auto-detect)")
-    parser.add_argument("--recipe-dir", default="sw", help="Recipe subdirectory (default: sw)")
+    parser.add_argument("--recipe-dir", default="core", help="Recipe subdirectory (default: core)")
     parser.add_argument("--type", choices=["cpp", "cmake", "module", "rust", "go", "python"], default="cpp", help="Project type (default: cpp)")
     parser.add_argument("--library", action="store_true", help="Create a library instead of an executable")
     args = parser.parse_args()

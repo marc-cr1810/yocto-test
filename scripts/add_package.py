@@ -21,7 +21,7 @@ CMAKE_TO_YOCTO_MAP = {
     "Threads": "",  # Built-in to toolchain
 }
 
-def detect_dependencies(project_dir, workspace_root):
+def detect_dependencies(project_dir, workspace_root, layer_dir=None):
     deps = set()
     cmake_lists = project_dir / "CMakeLists.txt"
     if cmake_lists.exists():
@@ -48,9 +48,17 @@ def detect_dependencies(project_dir, workspace_root):
                             break
                     
                     if not found:
-                        # Default: convert to lowercase (most packages follow this convention)
-                        # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
-                        deps.add(m.lower())
+                        # Check if a recipe exists for this dependency in the layer
+                        if layer_dir:
+                            recipe_pattern = f"{m.lower()}_*.bb"
+                            if list(layer_dir.rglob(recipe_pattern)):
+                                deps.add(m.lower())
+                                found = True
+                        
+                        if not found:
+                            # Default: convert to lowercase (most packages follow this convention)
+                            # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
+                            deps.add(m.lower())
     return sorted(list(filter(None, deps)))
 
 def detect_rust_dependencies(project_dir):
@@ -130,7 +138,7 @@ def main():
     parser = argparse.ArgumentParser(description="Add a project to a Yocto layer")
     parser.add_argument("project_path", help="Path to the project directory (or name if using --url)")
     parser.add_argument("--layer", default=None, help="Target layer name (default: auto-detect)")
-    parser.add_argument("--recipe-dir", default="sw", help="Recipe subdirectory (default: sw)")
+    parser.add_argument("--recipe-dir", default="core", help="Recipe subdirectory (default: core)")
     parser.add_argument("--pv", default="1.0", help="Package version (default: 1.0)")
     parser.add_argument("--type", choices=["cpp", "cmake", "autotools", "makefile", "module", "rust", "go", "python", "auto"], 
                         default="auto", help="Project type (default: auto)")
@@ -254,7 +262,7 @@ def main():
     # Detect dependencies based on project type
     detected_deps = []
     if project_type in ["cpp", "cmake"]:
-        detected_deps = detect_dependencies(project_dir, workspace_root)
+        detected_deps = detect_dependencies(project_dir, workspace_root, layer_dir)
     elif project_type == "rust":
         detected_deps = detect_rust_dependencies(project_dir)
     elif project_type == "go":
@@ -398,6 +406,7 @@ EXTERNALSRC = "${{THISDIR}}/{rel_project_path}"
     if add_to_image is None:
         add_to_image = not args.library
 
+    image_name = None  # Initialize to avoid UnboundLocalError
     if add_to_image:
         image_name = args.image
         if not image_name:
