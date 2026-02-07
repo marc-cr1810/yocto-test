@@ -7,7 +7,6 @@ import shutil
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yocto_utils import (
-    get_all_custom_layers,
     get_cached_layer,
     set_cached_layer,
     select_layer_interactive

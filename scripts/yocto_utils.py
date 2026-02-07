@@ -6,6 +6,14 @@ Provides common functions like finding the custom layer automatically.
 from pathlib import Path
 from typing import List, Optional
 import re
+import subprocess
+
+def run_command(cmd, cwd=None):
+    try:
+        result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, cwd=cwd)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 def get_all_custom_layers(workspace_root: Path) -> List[Path]:
     """
@@ -436,3 +444,38 @@ def add_package_to_image(workspace_root: Path, image_name: str, package_name: st
     except Exception as e:
         print(f"  Error updating image recipe: {e}")
         return False
+
+def get_yocto_branch(workspace_root: Path) -> str:
+    """
+    Detect the Yocto branch/series from the environment.
+    Strategy:
+    1. Check for LAYERSERIES_COMPAT_core in meta/conf/layer.conf
+    2. Fallback to 'master'
+    """
+    try:
+        # Method 1: Check layers/openembedded-core/meta/conf/layer.conf
+        candidates = list(workspace_root.glob("bitbake-builds/*/layers/openembedded-core/meta/conf/layer.conf"))
+        if not candidates:
+             candidates = list(workspace_root.glob("bitbake-builds/*/layers/meta-yocto/meta-poky/conf/layer.conf"))
+             
+        if candidates:
+            layer_conf = candidates[0]
+            with open(layer_conf, 'r') as f:
+                for line in f:
+                    if "LAYERSERIES_COMPAT_core" in line or "LAYERSERIES_COMPAT_poky" in line:
+                        parts = line.split('=')
+                        if len(parts) > 1:
+                            val = parts[1].strip().strip('"')
+                            return val.split()[-1]
+                            
+        # Method 2: Check folder name logic 
+        build_roots = list((workspace_root / "bitbake-builds").glob("poky-*"))
+        if build_roots:
+            name = build_roots[0].name
+            if "-" in name:
+                return name.split("-", 1)[1]
+
+    except Exception:
+        pass
+        
+    return "master"

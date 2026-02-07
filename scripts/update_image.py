@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import re
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yocto_utils import (
@@ -138,28 +139,85 @@ def main():
     print("  Scanning for workspace packages...")
     packages = []
     sw_dir = workspace_root / "sw"
-    if sw_dir.exists():
-        for d in sw_dir.iterdir():
-            if d.is_dir():
-                # Check if it has a recipe in meta-test
-                # We assume if it's in sw/, it's intended to be in the image
-                # A robust check would look for the recipe file, but for now we trust the folder structure
-                packages.append(d.name)
     
-    # Sort for stability
-    packages.sort()
+    # 1. Get all recipe names from the layer to validate against
+    layer_recipe_names = set()
+    for recipe_file in layer_dir.rglob("*.bb"):
+        # Handle versioned recipes (e.g., example_1.0.bb -> example)
+        stem = recipe_file.stem
+        if "_" in stem:
+            pn = stem.split("_")[0]
+        else:
+            pn = stem
+        layer_recipe_names.add(pn)
+
+    # 2. Walk sw/ recursively to find matching directories
+    # We look for directories whose name matches a recipe
+    # We limit depth naturally by what exists, but to avoid deep nesting issues
+    # we could limit it. For now, os.walk is fine.
+    
+    found_packages = set()
+    if sw_dir.exists():
+        for root, dirs, files in os.walk(sw_dir):
+            for d in dirs:
+                if d in layer_recipe_names:
+                    # Found a match!
+                    # e.g. sw/cpp/example matches recipes-core/example/example.bb
+                    found_packages.add(d)
+                
+    packages = sorted(list(found_packages))
 
     if not packages:
         print(f"  {BOLD}Status       : No workspace packages found.{NC}")
-        # We might still want to create the empty image recipe if it doesn't exist
     else:
-        print(f"  Status       : Found {len(packages)} packages: {', '.join(packages)}")
+        print(f"  Status       : Found {len(packages)} workspace packages: {', '.join(packages)}")
+
+    # 3. Read existing recipe to preserve manual additions
+    preserved_packages = set()
+    core_packages = {"packagegroup-core-boot"} # Always keep this or ensure it's there
+    
+    if image_recipe.exists():
+        with open(image_recipe, 'r') as f:
+            content = f.read()
+            
+        # Extract IMAGE_INSTALL
+        # Match with re.DOTALL to capture multiline
+        match = re.search(r'IMAGE_INSTALL\s*=\s*"(.*?)"', content, re.DOTALL)
+        if match:
+            existing_val = match.group(1)
+            # Normalize whitespace: replace newlines and backslashes with space
+            # Be careful: "package \ \n" -> "package   "
+            # we want to split by whitespace.
+            clean_val = existing_val.replace('\\', ' ').replace('\n', ' ')
+            existing_items = clean_val.split()
+            
+            for item in existing_items:
+                item = item.strip()
+                # Filter out pure backslashes if any remained (though replace should handle it)
+                if item and item != "\\" and item not in packages and item not in core_packages:
+                     preserved_packages.add(item)
+
+    if preserved_packages:
+        print(f"  Preserving   : {', '.join(sorted(preserved_packages))}")
 
     # Construct recipe content
     # We always regenerate it to ensure it's up to date
-    install_append = ""
-    for p in packages:
-        install_append += f"    {p} \\\n"
+    # Merge core + preserved + workspace
+    
+    all_packages = sorted(list(core_packages)) + sorted(list(preserved_packages)) + packages
+    
+    # Format with proper indentation and newlines
+    # Each item gets a newline and indent, except the last one doesn't needs a backslash if we close quote on next line?
+    # Standard Yocto style:
+    # IMAGE_INSTALL = "package \
+    #     package2 \
+    # "
+    
+    install_lines = []
+    for i, p in enumerate(all_packages):
+         install_lines.append(f"    {p}")
+    
+    install_str = " \\\n".join(install_lines)
     
     recipe_content = f"""SUMMARY = "Custom minimal image {image_name}"
 LICENSE = "MIT"
@@ -167,8 +225,8 @@ LICENSE = "MIT"
 inherit core-image
 
 # Minimal image configuration (like core-image-minimal)
-IMAGE_INSTALL = "packagegroup-core-boot \\
-{install_append}"
+IMAGE_INSTALL = "{install_str} \\
+"
 
 # Add SSH server
 IMAGE_FEATURES += "ssh-server-dropbear"

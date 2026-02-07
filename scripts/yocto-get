@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+import argparse
+import sys
+import os
+import subprocess
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
+try:
+    from yocto_utils import run_command as utils_run_command, get_yocto_branch
+except ImportError as e:
+    print(f"DEBUG: ImportError: {e}")
+    def utils_run_command(cmd, cwd=None):
+        subprocess.run(cmd, shell=True, check=True, cwd=cwd)
+    def get_yocto_branch(root): return DEFAULT_BRANCH
+
+# ANSI Colors
+BOLD = '\033[1m'
+CYAN = '\033[0;36m'
+GREEN = '\033[0;32m'
+RED = '\033[0;31m'
+YELLOW = '\033[1;33m'
+NC = '\033[0m'
+
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+SOURCES_DIR = WORKSPACE_ROOT / "yocto" / "sources"
+BUILD_DIR = WORKSPACE_ROOT / "bitbake-builds" / "poky-master" / "build"
+
+def run_command(cmd, cwd=None, capture=False):
+    try:
+        if capture:
+            return subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, cwd=cwd).stdout.strip()
+        else:
+            subprocess.run(cmd, shell=True, check=True, cwd=cwd)
+            return True
+    except subprocess.CalledProcessError as e:
+        if capture:
+            return None
+        print(f"{RED}Error running command: {cmd}{NC}")
+        print(e)
+        return False
+
+def get_active_layers():
+    output = run_command("bitbake-layers show-layers", cwd=BUILD_DIR, capture=True)
+    if not output:
+        return []
+    layers = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] != "layer":
+             if parts[0] in ["NOTE:", "WARNING:", "ERROR:"]:
+                 continue
+             layers.append(parts[0]) # name
+    return layers
+
+
+def ensure_layer_recursive(index, layer_name, vcs_url, subdir, branch, visited=None):
+    if visited is None:
+        visited = set()
+    
+    if layer_name in visited:
+        return True
+    visited.add(layer_name)
+
+    # Special handling for openembedded-core which is usually 'meta' or 'core'
+    if layer_name == "openembedded-core":
+        active_layers = get_active_layers()
+        if "meta" in active_layers or "core" in active_layers or "meta-poky" in active_layers:
+            print(f"  {GREEN}Skipping '{layer_name}' (provided by core/meta/poky).{NC}")
+            return True
+
+    print(f"\n{BOLD}Checking layer: {CYAN}{layer_name}{NC}...")
+    
+    # 1. Check if layer is active
+    active_layers = get_active_layers()
+    if layer_name in active_layers:
+        print(f"  {GREEN}Layer '{layer_name}' is already active.{NC}")
+        return True
+
+    # 2. Get dependencies and ensure them first
+    print(f"  Resolving dependencies for '{layer_name}'...")
+    
+    # Optimization: if we have the layer item from previous step, pass it?
+    # For now search is fine.
+    
+    layers_search = index.search_layers(layer_name)
+    layer_item = None
+    for l in layers_search:
+        if l['name'] == layer_name:
+            layer_item = l
+            break
+            
+    if layer_item:
+        deps = index.get_layer_dependencies(layer_item['id'])
+        if deps:
+            print(f"  {YELLOW}Dependencies found: {', '.join([d['name'] for d in deps])}{NC}")
+            for dep in deps:
+                # Resolve details for dependency
+                dep_lb = index.get_layerbranch(dep['id'])
+                
+                if dep_lb:
+                    dep_vcs = dep_lb.get('vcs_url', dep.get('vcs_url'))
+                    dep_subdir = dep_lb.get('vcs_subdir', '')
+                    # Fix: Ensure we match truthfully or fallback
+                    dep_branch = dep_lb.get('actual_branch') or branch 
+                    
+                    # Recursion
+                    if not ensure_layer_recursive(index, dep['name'], dep_vcs, dep_subdir, dep_branch, visited):
+                        return False
+                else:
+                    print(f"  {YELLOW}Warning: Could not resolve details for dependency '{dep['name']}'. Skipping.{NC}")
+    else:
+        print(f"  {YELLOW}Warning: Could not query layer details for '{layer_name}'. Dependencies might be missing.{NC}")
+
+    # 3. Check if layer exists locally in sources/
+    layer_path = SOURCES_DIR / layer_name
+    if not layer_path.exists():
+        print(f"  {YELLOW}Layer '{layer_name}' not found locally. Cloning...{NC}")
+        SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+        
+        repo_name = vcs_url.split('/')[-1].replace('.git', '')
+        repo_path = SOURCES_DIR / repo_name
+        
+        if not repo_path.exists():
+            print(f"  Cloning {repo_name} from {vcs_url} (branch: {branch})...")
+            cmd = f"git clone -b {branch} {vcs_url} {repo_path}"
+            if not run_command(cmd):
+                print(f"  {YELLOW}Clone failed with branch '{branch}'. Trying 'master'...{NC}")
+                cmd_master = f"git clone -b master {vcs_url} {repo_path}"
+                if not run_command(cmd_master):
+                    return False
+        else:
+             print(f"  {YELLOW}Repo '{repo_name}' exists, skipping clone.{NC}")
+             
+        if subdir:
+             layer_path = repo_path / subdir
+        else:
+             layer_path = repo_path
+             
+    else:
+         pass 
+
+    # Re-eval layer path
+    repo_name = vcs_url.split('/')[-1].replace('.git', '')
+    repo_path = SOURCES_DIR / repo_name
+    
+    final_layer_path = repo_path
+    if subdir:
+        final_layer_path = repo_path / subdir
+        
+    # Check if we landed in a valid layer
+    if not (final_layer_path / "conf" / "layer.conf").exists():
+        # Heuristic: maybe valid info is just repo_path?
+        if (repo_path / "conf" / "layer.conf").exists():
+             final_layer_path = repo_path
+        else:
+             print(f"  {RED}Warning: No layer.conf found at {final_layer_path}{NC}")
+
+    print(f"  Adding layer to bblayers.conf: {final_layer_path}")
+    
+    cmd = f"bitbake-layers add-layer {final_layer_path.resolve()}"
+    if run_command(cmd, cwd=BUILD_DIR):
+        print(f"  {GREEN}Layer '{layer_name}' added successfully.{NC}")
+        return True
+    return False
+
+# ... add_to_image ...
+
+def main():
+    default_branch = get_yocto_branch(WORKSPACE_ROOT)
+    parser = argparse.ArgumentParser(description="Fetch and install recipes from OpenEmbedded Layer Index")
+    parser.add_argument("recipe", help="Recipe name to fetch")
+    parser.add_argument("--image", help="Target image to add recipe to")
+    parser.add_argument("--branch", default=default_branch, help=f"Yocto Branch (default: {default_branch})")
+    args = parser.parse_args()
+
+    print(f"{BOLD}Detected Workspace Branch: {CYAN}{default_branch}{NC}")
+
+    # 1. Search
+    print(f"{BOLD}Searching for '{args.recipe}' in branch '{args.branch}'...{NC}")
+    index = LayerIndex(branch=args.branch)
+    if not index.get_branch_id():
+        print(f"{RED}Invalid branch '{args.branch}'.{NC}")
+        sys.exit(1)
+        
+    recipes = index.search_recipes(args.recipe)
+    
+    exact_match = None
+    for r in recipes:
+        if r['pn'] == args.recipe:
+            exact_match = r
+            break
+            
+    candidate = None
+    if exact_match:
+        candidate = index.get_recipe_layer_info(exact_match)
+    elif recipes:
+        for r in recipes:
+            info = index.get_recipe_layer_info(r)
+            if info:
+                candidate = info
+                break
+                
+    if not candidate:
+        print(f"{RED}Recipe '{args.recipe}' not found in branch '{args.branch}'.{NC}")
+        sys.exit(1)
+        
+    print(f"  Found: {GREEN}{candidate['recipe_name']}{NC} in layer {CYAN}{candidate['layer_name']}{NC}")
+    
+    # 2. Ensure Layer (Recursive)
+    if not ensure_layer_recursive(index, candidate['layer_name'], candidate['layer_vcs_url'], candidate['vcs_subdir'], candidate.get('actual_branch', args.branch)):
+        print(f"{RED}Failed to configure layer.{NC}")
+        sys.exit(1)
+        
+    # 3. Add to Image
+    add_to_image(candidate['recipe_name'], args.image)
+    
+    print(f"\n{BOLD}{GREEN}Done!{NC}")
+    print(f"Run {CYAN}bitbake {args.image or 'falcon-image'}{NC} to build.")
+
+if __name__ == "__main__":
+    main()
+

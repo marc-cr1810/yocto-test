@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+import argparse
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
+try:
+    from yocto_utils import get_yocto_branch
+except ImportError:
+    def get_yocto_branch(root): return DEFAULT_BRANCH
+
+# ANSI Colors
+BOLD = '\033[1m'
+CYAN = '\033[0;36m'
+GREEN = '\033[0;32m'
+RED = '\033[0;31m'
+NC = '\033[0m'
+
+def main():
+    root = Path(__file__).resolve().parent.parent
+    default_branch = get_yocto_branch(root)
+    
+    parser = argparse.ArgumentParser(description="Search for recipes in the OpenEmbedded Layer Index")
+    parser.add_argument("term", help="Search term (recipe name)")
+    parser.add_argument("--branch", default=default_branch, help=f"Yocto branch to search (default: {default_branch})")
+    parser.add_argument("--limit", type=int, default=10, help="Limit number of results")
+    args = parser.parse_args()
+
+    print(f"{BOLD}Searching for '{args.term}' in branch '{args.branch}'...{NC}")
+
+    index = LayerIndex(branch=args.branch)
+    # Ensure branch ID is valid
+    if not index.get_branch_id():
+        print(f"{RED}Error: Branch '{args.branch}' not found in Layer Index.{NC}")
+        sys.exit(1)
+
+    recipes = index.search_recipes(args.term)
+    
+    if not recipes:
+        print(f"{RED}No recipes found matching '{args.term}' on the Layer Index.{NC}")
+        sys.exit(0)
+
+    # Filter and resolve details
+    results = []
+    print(f"Found {len(recipes)} potential matches. Filtering for branch '{args.branch}'...")
+    
+    count = 0
+    for r in recipes:
+        # Optimization: only resolve top N
+        if count >= args.limit:
+            break
+            
+        info = index.get_recipe_layer_info(r)
+        if info:
+            results.append(info)
+            count += 1
+            # print(".", end="", flush=True)
+    
+    if not results:
+        print(f"{RED}No recipes found for branch '{args.branch}' matching '{args.term}'.{NC}")
+        print(f"Note: {len(recipes)} recipes matched the name, but none were compatible with branch '{args.branch}'.")
+        sys.exit(0)
+
+    # Display results
+    print(f"\n{BOLD}{'Recipe':<30} {'Version':<20} {'Layer':<25} {'Summary'}{NC}")
+    print("-" * 100)
+    for res in results:
+        summary = res['summary'][:40] + "..." if len(res['summary']) > 40 else res['summary']
+        print(f"{GREEN}{res['recipe_name']:<30}{NC} {res['version']:<20} {CYAN}{res['layer_name']:<25}{NC} {summary}")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)
