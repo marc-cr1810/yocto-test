@@ -143,10 +143,19 @@ Builds and boots an image using QEMU with smart auto-detection.
 > **Smart Features**: Auto-detects built images, shows interactive menu for multiple images with build times, checks image freshness to avoid unnecessary rebuilds, and remembers your last-used image.
 
 ### `yocto-machine`
-Manages the target hardware configuration in `local.conf`. Use it to switch between machines or scaffold new ones.
-- **Switch**: `yocto-machine qemuarm64`
-- **Scaffold**: `yocto-machine --new my-board`
-- **List**: `yocto-machine --list`
+Manages the target hardware configuration in `local.conf`.
+- **List**: `yocto-machine list`
+- **Switch**: `yocto-machine switch <name>` (or just `yocto-machine <name>`)
+- **Search**: `yocto-machine search <term>` (searches Layer Index)
+- **Get**: `yocto-machine get <name> [--branch <branch>]` (fetches and installs machine layer)
+- **Scaffold**: `yocto-machine new <name>`
+
+### `yocto-config`
+Manages configuration fragments in `toolcfg.conf` (e.g. `machine/qemuarm64`).
+- **List**: `yocto-config list`
+- **Enable**: `yocto-config enable <fragment>`
+- **Disable**: `yocto-config disable <fragment>`
+
 
 ### `yocto-layers`
 Synchronizes the BitBake configuration with the local layers or scaffolds new layers.

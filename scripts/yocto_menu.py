@@ -79,6 +79,9 @@ class YoctoMenuApp:
         # Configuration Submenu
         config_menu = Menu("Configuration", [
             MenuItem("Select Machine", self.action_select_machine, "Switch target machine"),
+            MenuItem("Search Machine", self.action_search_machine, "Search for machines in Layer Index"),
+            MenuItem("Get Machine", self.action_get_machine, "Fetch and install a machine's layer"),
+            MenuItem("Manage Fragments", self.action_manage_fragments, "Enable/Disable configuration fragments"),
             MenuItem("Machine Settings", f"python3 {SCRIPTS_DIR}/machine_manager.py", "Manage target machine configuration"),
             MenuItem("Optimize Workspace", f"python3 {SCRIPTS_DIR}/optimize_workspace.py", "Optimize local.conf for this host"),
             MenuItem("IDE Setup", f"python3 {SCRIPTS_DIR}/setup_ide.py", "Generate IDE configuration"),
@@ -144,7 +147,8 @@ class YoctoMenuApp:
             try:
                 machine = yocto_utils.get_machine_from_config(self.workspace_root) or "Unknown"
                 layer = yocto_utils.get_cached_layer(self.workspace_root) or "None"
-                status_text = f"Machine: {machine} | Layer: {layer}"
+                image = yocto_utils.get_cached_image(self.workspace_root) or "None"
+                status_text = f"Machine: {machine} | Layer: {layer} | Image: {image}"
                 if len(status_text) + 4 < width:
                     self.stdscr.addstr(1, width - len(status_text) - 2, status_text, curses.color_pair(4))
             except Exception:
@@ -337,6 +341,110 @@ class YoctoMenuApp:
         # Show a quick confirmation (simulated since we are in curses)
         # Actually run_shell_command clears screen, so let's just use that to confirm
         self.run_shell_command(f"echo 'Selected image: {image}'")
+
+    def action_search_machine(self):
+        """Search for a machine."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            term = input("Enter search term: ").strip()
+            if term:
+                # Use subcommand syntax
+                cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py search {term}"
+                self.run_shell_command(cmd)
+            else:
+                self.run_shell_command("echo 'Cancelled.'")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_get_machine(self):
+        """Get (install) a machine."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            name = input("Enter machine name to install: ").strip()
+            if name:
+                # Use subcommand syntax
+                cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py get {name}"
+                self.run_shell_command(cmd)
+            else:
+                self.run_shell_command("echo 'Cancelled.'")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_manage_fragments(self):
+        """Submenu for fragment management."""
+        options = [
+            ("List Active Fragments", self.action_list_fragments),
+            ("Enable Fragment", self.action_enable_fragment),
+            ("Disable Fragment", self.action_disable_fragment),
+            ("Back", None) # Back returns to previous menu
+        ]
+        
+        while True:
+            # We construct a submenu loop here
+            # Ideally proper submenu implementation, but for now just show a selection
+            # Reuse show_selection_menu? logic or just loop
+            
+            # Simplified: Use a specific submenu method if I had one, 
+            # OR just list them.
+            
+            # Let's map it to indices
+            items = [opt[0] for opt in options]
+            
+            # Small hack: verify "Back" breaks loop
+            # We can use simple input loop or use existing menu structure logic?
+            # Existing logic is screen-based.
+            # Let's just create a dynamic menu handling here because architecture allows it.
+            
+            # But wait, self.show_selection_menu expects a callback.
+            # Let's use that.
+            
+            self.show_selection_menu("Fragment Management", items, self._handle_fragment_menu)
+            break # show_selection_menu is blocking-ish in its own loop but returns result to callback
+
+    def _handle_fragment_menu(self, selection):
+        if selection == "List Active Fragments":
+            self.action_list_fragments()
+        elif selection == "Enable Fragment":
+            self.action_enable_fragment()
+        elif selection == "Disable Fragment":
+             self.action_disable_fragment()
+        # Back does nothing, just return
+
+    def action_list_fragments(self):
+        self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py list")
+
+    def action_enable_fragment(self):
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            val = input("Enter fragment to enable (e.g. machine/raspberrypi4): ").strip()
+            if val:
+                self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py enable {val}")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_disable_fragment(self):
+        # Could retrieve list first and make selection, for now simple input
+        # Or better: parse list and show selection?
+        # Let's try to be fancy: get list, show menu for disable
+        
+        # We need a way to get list programmatically. config_manager output parsing?
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+             # Run list to show user
+             os.system(f"python3 {SCRIPTS_DIR}/config_manager.py list")
+             val = input("\nEnter fragment to disable (or Enter to cancel): ").strip()
+             if val:
+                 self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py disable {val}")
+        finally:
+             curses.reset_prog_mode()
+             self.stdscr.refresh()
 
 if __name__ == "__main__":
     try:

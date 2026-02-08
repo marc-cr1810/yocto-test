@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI, get_cached_image, find_custom_layer, find_image_recipes
+from yocto_utils import UI, get_cached_image, find_custom_layer, find_image_recipes, prune_machine_fragments
 
 def main():
     parser = argparse.ArgumentParser(description="Build a Yocto recipe or image")
@@ -51,6 +51,10 @@ def main():
             sys.exit(1)
     
     UI.print_header("Yocto Build Manager")
+    
+    # Ensure valid configuration before building
+    prune_machine_fragments(workspace_root)
+    
     UI.print_item("Target", target)
     
     # Clean if requested

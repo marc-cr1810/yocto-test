@@ -61,6 +61,7 @@ yocto-live() { live_edit.py "$@"; }
 yocto-ide() { setup_ide.py "$@"; }
 yocto-sync() { sync_deps.py "$@"; }
 yocto-health() { check_health.py "$@"; }
+yocto-config() { config_manager.py "$@"; }
 yocto-menu() { python3 "scripts/yocto_menu.py"; }
 # Alias for familiarity with kernel workflow
 alias makemenu="yocto-menu"

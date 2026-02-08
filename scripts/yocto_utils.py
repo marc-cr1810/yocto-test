@@ -162,6 +162,14 @@ def get_available_machines(workspace_root: Path) -> dict:
             # Exclude anything that might be in a nested poky repo if it exists (sanity check)
             if "openembedded-core" not in str(m):
                 machines['custom'].append(m.stem)
+
+    # 3. Scan Sources (External Layers)
+    sources_dir = workspace_root / "yocto" / "sources"
+    if sources_dir.exists():
+        for m in sources_dir.rglob("conf/machine/*.conf"):
+            # Avoid duplicates if they somehow exist in both
+            if m.stem not in machines['custom'] and m.stem not in machines['poky']:
+                 machines['custom'].append(m.stem)
                 
     machines['poky'].sort()
     machines['custom'].sort()
@@ -562,3 +570,45 @@ def get_yocto_branch(workspace_root: Path) -> str:
         pass
         
     return "master"
+
+def prune_machine_fragments(workspace_root: Path):
+    """
+    Check for and disable conflicting machine/* fragments in toolcfg.conf.
+    This resolves issues where bitbake complains about duplicate MACHINE assignments.
+    """
+    if not workspace_root:
+        return
+
+    # Assuming standard layout
+    poky_dir = workspace_root / "bitbake-builds" / "poky-master"
+    toolcfg = poky_dir / "build" / "conf" / "toolcfg.conf"
+    
+    if not toolcfg.exists():
+        return
+        
+    try:
+        content = toolcfg.read_text()
+        matches = re.findall(r'machine/([\w-]+)', content)
+        
+        if matches:
+            UI.print_item("Config Fix", "Disabling conflicting machine fragments...")
+            
+            new_content = content
+            for machine in matches:
+                fragment = f"machine/{machine}"
+                # Remove fragment and potential surrounding whitespace
+                if f" {fragment}" in new_content:
+                    new_content = new_content.replace(f" {fragment}", "")
+                elif f"{fragment} " in new_content:
+                    new_content = new_content.replace(f"{fragment} ", "")
+                else:
+                    new_content = new_content.replace(fragment, "")
+                
+                UI.print_item("Disabled", fragment)
+
+            if new_content != content:
+                toolcfg.write_text(new_content)
+                UI.print_success("Updated toolcfg.conf to remove machine fragments")
+                
+    except Exception as e:
+        print(f"  {UI.YELLOW}[WARN] Failed to prune fragments: {e}{UI.NC}")
