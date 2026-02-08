@@ -5,13 +5,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-# ANSI Colors
-BOLD = '\033[1m'
-CYAN = '\033[0;36m'
-GREEN = '\033[0;32m'
-YELLOW = '\033[1;33m'
-RED = '\033[0;31m'
-NC = '\033[0m' # No Color
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI, find_custom_layer
 
 def format_size(size):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -29,13 +25,10 @@ def check_disk_space(path):
         "percent": percent
     }
 
-def print_header(text):
-    print(f"\n{BOLD}{CYAN}--- {text} ---{NC}")
-
 def get_status_label(level):
-    if level == "OK": return f"{GREEN}[ OK ]{NC}"
-    if level == "WARN": return f"{YELLOW}[ WARN ]{NC}"
-    if level == "CRIT": return f"{RED}[ CRIT ]{NC}"
+    if level == "OK": return f"{UI.GREEN}[ OK ]{UI.NC}"
+    if level == "WARN": return f"{UI.YELLOW}[ WARN ]{UI.NC}"
+    if level == "CRIT": return f"{UI.RED}[ CRIT ]{UI.NC}"
     return f"[ {level} ]"
 
 def main():
@@ -43,12 +36,10 @@ def main():
     build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
     sstate_dir = workspace_root / "bitbake-builds" / "shared" / "sstate-cache"
     
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Yocto Workspace Health Dashboard{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header("Yocto Workspace Health Dashboard")
     
     # 1. Disk Space
-    print_header("Disk Space")
+    UI.print_item("Check", "Disk Space")
     try:
         disk = check_disk_space(workspace_root)
         status = "OK"
@@ -61,7 +52,7 @@ def main():
         print(f"  {get_status_label('CRIT')} Error checking disk space: {e}")
         
     # 2. Cache Status
-    print_header("Cache Health")
+    UI.print_item("Check", "Cache Health")
     if sstate_dir.exists():
         count = len(list(sstate_dir.glob("*")))
         status = "OK" if count > 0 else "WARN"
@@ -70,7 +61,7 @@ def main():
         print(f"  {get_status_label('WARN')} SState Cache: Not found (Shared cache not initialized?)")
         
     # 3. Environment Status
-    print_header("Environment")
+    UI.print_item("Check", "Environment")
     bitbake_path = workspace_root / "bitbake-builds" / "poky-master" / "layers" / "bitbake"
     bb_status = "OK" if bitbake_path.exists() else "CRIT"
     print(f"  {get_status_label(bb_status)} BitBake Tools")
@@ -79,10 +70,8 @@ def main():
     print(f"  {get_status_label(build_status)} Build Folder")
         
     # 4. Layer Sanity
-    print_header("Layer Sanity")
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    UI.print_item("Check", "Layer Sanity")
     try:
-        from yocto_utils import find_custom_layer
         custom_layer = find_custom_layer(workspace_root)
         conf = custom_layer / "conf" / "layer.conf"
         status = "OK" if conf.exists() else "CRIT"
@@ -91,20 +80,27 @@ def main():
         print(f"  {get_status_label('CRIT')} No custom layer found")
 
     # 5. Local Projects
-    print_header("Local Projects")
+    UI.print_item("Check", "Local Projects")
     sw_dir = workspace_root / "sw"
     if sw_dir.exists():
-        projects = [d.name for d in sw_dir.iterdir() if d.is_dir()]
+        projects = []
+        for d in sw_dir.iterdir():
+          if d.is_dir():
+            for p in d.iterdir():
+              if p.is_dir():
+                projects.append(p)
+        
         print(f"  Total Projects: {len(projects)}")
-        for p in projects:
+        for p_path in projects:
+            p = p_path.name
             recipe_exists = any((custom_layer).rglob(f"{p}_*.bb"))
             status = "OK" if recipe_exists else "WARN"
             label = "REGISTERED" if recipe_exists else "UNREGISTERED"
             print(f"    {get_status_label(status)} {p:15} ({label})")
     else:
         print(f"  {get_status_label('CRIT')} sw/ directory not found")
-
-    print(f"\n{BOLD}{CYAN}=================================================={NC}")
-
+        
 if __name__ == "__main__":
     main()
+
+

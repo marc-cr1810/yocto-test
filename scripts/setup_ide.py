@@ -4,6 +4,10 @@ import sys
 import json
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI
+
 def find_file(base_dir, pattern):
     for path in base_dir.rglob(pattern):
         if path.is_file() and os.access(path, os.X_OK):
@@ -18,7 +22,9 @@ def main():
     workspace_root = Path(__file__).resolve().parent.parent
     build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
     
-    print("Searching for Yocto toolchain...")
+    UI.print_header("Setting up IDE & Toolchain Sync")
+    
+    UI.print_item("Status", "Searching for Yocto toolchain...")
     
     # 1. Find the cross-compiler
     # We look for something like 'aarch64-poky-linux-gcc'
@@ -29,14 +35,13 @@ def main():
         
     if not compiler_path:
         # Fallback search in tmp
-        print("Warning: Standard compiler path not found, searching broader...")
+        UI.print_warning("Standard compiler path not found, searching broader...")
         compiler_path = find_file(build_dir / "tmp", "*-gcc")
 
     if not compiler_path:
-        print("Error: Could not find cross-compiler.")
-        sys.exit(1)
+        UI.print_error("Could not find cross-compiler.", fatal=True)
 
-    print(f"Found compiler: {compiler_path}")
+    UI.print_success(f"Found compiler: {compiler_path.name}")
 
     # 2. Find the target sysroot
     # We look for things like 'recipe-sysroot' in a target directory
@@ -50,10 +55,10 @@ def main():
                 break
 
     if not sysroot_path:
-        print("Warning: Could not find a representative target sysroot.")
+        UI.print_warning("Could not find a representative target sysroot.")
         # We can still proceed with just the compiler
     else:
-        print(f"Using sysroot: {sysroot_path}")
+        UI.print_success(f"Found sysroot: {sysroot_path.name}")
 
     # 3. Generate .vscode/cmake-kits.json
     vscode_dir = workspace_root / ".vscode"
@@ -105,22 +110,9 @@ def main():
     with open(kits_file, "w") as f:
         json.dump(kits, f, indent=4)
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Setting up IDE & Toolchain Sync{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-
-    # ... (logic remains same)
-
-    print(f"\n{GREEN}Success! Updated {kits_file}{NC}")
-    print(f"{BOLD}Action Required:{NC}")
+    print(f"\n{UI.GREEN}Success! Updated {kits_file}{UI.NC}")
+    print(f"{UI.BOLD}Action Required:{UI.NC}")
     print("  In VS Code, run 'CMake: Select a Kit' and choose 'Yocto Toolchain'.")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
 
 if __name__ == "__main__":
     main()

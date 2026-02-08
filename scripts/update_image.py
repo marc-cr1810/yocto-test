@@ -2,9 +2,13 @@
 import os
 import sys
 import re
+import argparse
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from yocto_utils import (
+    UI,
     find_custom_layer,
     find_image_recipes,
     get_cached_image,
@@ -16,16 +20,6 @@ from yocto_utils import (
 )
 
 def main():
-    import argparse
-    
-    # ANSI Colors (define early so they can be used throughout)
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
-    
     parser = argparse.ArgumentParser(description="Refresh the main image recipe with workspace packages")
     parser.add_argument("image", nargs="?", default=None, help="Target image recipe name (auto-detected if not specified)")
     parser.add_argument("--layer", help="Layer name to use (default: auto-detect)")
@@ -48,30 +42,27 @@ def main():
         all_layers = get_all_custom_layers(workspace_root)
         
         if not all_layers:
-            print(f"{BOLD}{RED}Error: No custom layers found.{NC}")
-            print(f"  Run '{GREEN}yocto-layers --new <name>{NC}' to create a layer first.")
+            UI.print_error("No custom layers found.")
+            print(f"  Run '{UI.GREEN}yocto-layers --new <name>{UI.NC}' to create a layer first.")
             sys.exit(1)
         
         # Use interactive selection if forced or multiple layers
         if args.interactive or args.layer_interactive or len(all_layers) > 1:
             layer_dir = select_layer_interactive(workspace_root, all_layers, cached_layer)
             if layer_dir is None:
-                print(f"{BOLD}{RED}No layer selected. Exiting.{NC}")
-                sys.exit(1)
+                UI.print_error("No layer selected.", fatal=True)
         else:
             # Single layer - auto-select
             layer_dir = all_layers[0]
-            print(f"  Auto-detected layer: {BOLD}{layer_dir.name}{NC}")
+            UI.print_item("Layer", layer_dir.name)
 
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Refreshing Image Recipe Content{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header("Refreshing Image Recipe Content")
 
     # Smart recipe selection
     image_name = args.image
     
     if image_name is None:
-        print(f"  {BOLD}Auto-detecting image recipe...{NC}")
+        UI.print_item("Status", "Auto-detecting image recipe...")
         
         # Get cached image if not disabled
         cached_image = None if args.no_cache else get_cached_image(workspace_root)
@@ -87,7 +78,7 @@ def main():
                 default_choice = 1
                 for i, recipe in enumerate(recipes, 1):
                     cached_marker = " [last used]" if recipe == cached_image else ""
-                    print(f"    {i}. {recipe}{cached_marker}")
+                    print(f"      {i}. {recipe}{cached_marker}")
                     
                     if recipe == cached_image:
                         default_choice = i
@@ -110,10 +101,10 @@ def main():
             else:
                 # Single recipe - auto-select
                 image_name = recipes[0]
-                print(f"  Auto-detected recipe: {BOLD}{image_name}{NC}")
+                UI.print_item("Recipe", image_name)
         else:
             # No recipes - prompt for new name
-            print(f"  {YELLOW}No existing image recipes found.{NC}")
+            UI.print_warning("No existing image recipes found.")
             suggested_name = cached_image if cached_image else "test-image"
             
             response = input(f"  Create new recipe '{suggested_name}'? [Y/n]: ").strip().lower()
@@ -123,7 +114,7 @@ def main():
             else:
                 image_name = suggested_name
             
-            print(f"  Will create: {BOLD}{image_name}{NC}")
+            UI.print_item("Action", f"Creating {image_name}")
     
     # Handle .bb extension if provided
     if image_name.endswith(".bb"):
@@ -131,12 +122,12 @@ def main():
         
     image_recipe = layer_dir / "recipes-images" / "images" / f"{image_name}.bb"
 
-    print(f"  Target Image : {BOLD}{image_name}{NC}")
+    UI.print_item("Target Image", image_name)
 
     # Ensure image recipe directory exists
     image_recipe.parent.mkdir(parents=True, exist_ok=True)
 
-    print("  Scanning for workspace packages...")
+    UI.print_item("Status", "Scanning for workspace packages...")
     packages = []
     sw_dir = workspace_root / "sw"
     
@@ -152,66 +143,44 @@ def main():
         layer_recipe_names.add(pn)
 
     # 2. Walk sw/ recursively to find matching directories
-    # We look for directories whose name matches a recipe
-    # We limit depth naturally by what exists, but to avoid deep nesting issues
-    # we could limit it. For now, os.walk is fine.
-    
     found_packages = set()
     if sw_dir.exists():
         for root, dirs, files in os.walk(sw_dir):
             for d in dirs:
                 if d in layer_recipe_names:
-                    # Found a match!
-                    # e.g. sw/cpp/example matches recipes-core/example/example.bb
                     found_packages.add(d)
                 
     packages = sorted(list(found_packages))
 
     if not packages:
-        print(f"  {BOLD}Status       : No workspace packages found.{NC}")
+        UI.print_warning("No workspace packages found.")
     else:
-        print(f"  Status       : Found {len(packages)} workspace packages: {', '.join(packages)}")
+        UI.print_item("Found", f"{len(packages)} workspace packages: {', '.join(packages)}")
 
     # 3. Read existing recipe to preserve manual additions
     preserved_packages = set()
-    core_packages = {"packagegroup-core-boot"} # Always keep this or ensure it's there
+    core_packages = {"packagegroup-core-boot"} # Always keep this
     
     if image_recipe.exists():
         with open(image_recipe, 'r') as f:
             content = f.read()
             
-        # Extract IMAGE_INSTALL
-        # Match with re.DOTALL to capture multiline
         match = re.search(r'IMAGE_INSTALL\s*=\s*"(.*?)"', content, re.DOTALL)
         if match:
             existing_val = match.group(1)
-            # Normalize whitespace: replace newlines and backslashes with space
-            # Be careful: "package \ \n" -> "package   "
-            # we want to split by whitespace.
             clean_val = existing_val.replace('\\', ' ').replace('\n', ' ')
             existing_items = clean_val.split()
             
             for item in existing_items:
                 item = item.strip()
-                # Filter out pure backslashes if any remained (though replace should handle it)
                 if item and item != "\\" and item not in packages and item not in core_packages:
                      preserved_packages.add(item)
 
     if preserved_packages:
-        print(f"  Preserving   : {', '.join(sorted(preserved_packages))}")
+        UI.print_item("Preserved", ', '.join(sorted(preserved_packages)))
 
     # Construct recipe content
-    # We always regenerate it to ensure it's up to date
-    # Merge core + preserved + workspace
-    
     all_packages = sorted(list(core_packages)) + sorted(list(preserved_packages)) + packages
-    
-    # Format with proper indentation and newlines
-    # Each item gets a newline and indent, except the last one doesn't needs a backslash if we close quote on next line?
-    # Standard Yocto style:
-    # IMAGE_INSTALL = "package \
-    #     package2 \
-    # "
     
     install_lines = []
     for i, p in enumerate(all_packages):
@@ -238,11 +207,9 @@ IMAGE_LINGUAS = ""
     with open(image_recipe, "w") as f:
         f.write(recipe_content)
 
-    print(f"\n{GREEN}Success! Updated image recipe at:{NC}")
-    print(f"  Path         : {image_recipe}")
-    print(f"\n{BOLD}Action Required:{NC}")
-    print(f"  Run '{GREEN}bitbake {image_name}{NC}' to build the full image.")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_success("Updated image recipe")
+    UI.print_item("Path", str(image_recipe))
+    print(f"\n  Run '{UI.GREEN}yocto-build {image_name}{UI.NC}' to build the full image.")
     
     # Update caches on successful recipe update
     set_cached_image(workspace_root, image_name)

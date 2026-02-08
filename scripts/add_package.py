@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import yocto_utils
+from yocto_utils import UI, get_all_custom_layers, get_cached_layer, get_cached_image, find_custom_layer, find_image_recipes, add_package_to_image, set_cached_image
 
 # Special case mappings (only for packages that don't follow the lowercase convention)
 CMAKE_TO_YOCTO_MAP = {
@@ -138,72 +138,57 @@ def main():
     parser.add_argument("--url", help="Git URL to add as a submodule")
     args = parser.parse_args()
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Adding Project to Yocto Layer{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header("Add Project to Yocto")
 
     workspace_root = Path(__file__).resolve().parent.parent
 
     if args.url:
-        print(f"  URL          : {args.url}")
+        UI.print_item("Git URL", args.url)
         project_name = args.project_path  # Treat first arg as name
         submodules_dir = workspace_root / "submodules"
         submodules_dir.mkdir(exist_ok=True)
         project_dir = submodules_dir / project_name
         
         if project_dir.exists():
-            print(f"  {BOLD}Status       : Submodule directory {project_dir} already exists.{NC}")
+            UI.print_warning(f"Submodule directory {project_dir} already exists.")
         else:
-            print(f"  Status       : Adding git submodule '{project_name}'...")
+            UI.print_item("Status", f"Adding git submodule '{project_name}'...")
             if not (workspace_root / ".git").exists():
-                print(f"  Error: Workspace is not a git repository. Cannot use submodules.")
-                sys.exit(1)
+                UI.print_error("Workspace is not a git repository. Cannot use submodules.", fatal=True)
             try:
                 subprocess.run(["git", "submodule", "add", args.url, str(project_dir)], cwd=workspace_root, check=True)
-                print(f"  {GREEN}Success! Submodule added.{NC}")
+                UI.print_success("Submodule added.")
             except subprocess.CalledProcessError as e:
-                print(f"  Error adding submodule: {e}")
-                sys.exit(1)
+                UI.print_error(f"Failed to add submodule: {e}", fatal=True)
     else:
         project_dir = Path(args.project_path).resolve()
         project_name = project_dir.name
         if not project_dir.exists():
-            print(f"Error: Project directory {project_dir} does not exist.")
-            sys.exit(1)
+            UI.print_error(f"Project directory {project_dir} does not exist.", fatal=True)
 
     # Auto-detect layer if not specified
     layer_name = args.layer
     if layer_name is None:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from yocto_utils import get_all_custom_layers, get_cached_layer
-        
         cached_layer = get_cached_layer(workspace_root)
         all_layers = get_all_custom_layers(workspace_root)
         
         if not all_layers:
-            print(f"{BOLD}{RED}Error: No custom layers found.{NC}")
-            print(f"  Run '{GREEN}yocto-layers --new <name>{NC}' to create a layer first.")
+            UI.print_error("No custom layers found.")
+            print(f"  Run 'yocto-layers --new <name>' to create a layer first.")
             sys.exit(1)
         
         if len(all_layers) == 1:
             # Single layer - auto-select
             layer_name = all_layers[0].name.replace('meta-', '')
-            print(f"  Auto-detected layer: {BOLD}meta-{layer_name}{NC}")
+            UI.print_item("Auto-detected layer", f"meta-{layer_name}")
         elif cached_layer:
             # Use cached layer
             layer_name = cached_layer.replace('meta-', '')
-            print(f"  Using last-used layer: {BOLD}meta-{layer_name}{NC}")
+            UI.print_item("Using last-used layer", f"meta-{layer_name}")
         else:
             # Multiple layers, use first one
             layer_name = all_layers[0].name.replace('meta-', '')
-            print(f"  Using layer: {BOLD}meta-{layer_name}{NC}")
+            UI.print_item("Using layer", f"meta-{layer_name}")
     
     # Prefixing logic
     if not layer_name.startswith("meta-"):
@@ -229,11 +214,10 @@ def main():
         elif (project_dir / "Makefile").exists():
             project_type = "makefile"
         else:
-            # Default to cpp if unsure for this context, or warn
-            print(f"  {BOLD}Warning:{NC} Could not auto-detect project type. Defaulting to 'cpp'.")
+            UI.print_warning("Could not auto-detect project type. Defaulting to 'cpp'.")
             project_type = "cpp"
     
-    print(f"  Project Type : {project_type}")
+    UI.print_item("Project Type", project_type)
     
     # Define paths
     workspace_root = Path(__file__).resolve().parent.parent
@@ -245,7 +229,6 @@ def main():
     recipe_dir.mkdir(parents=True, exist_ok=True)
 
     # Calculate relative path from recipe directory to project directory
-    # Use os.path.relpath to get a reliable relative path
     rel_project_path = os.path.relpath(project_dir, recipe_dir)
 
     # Detect dependencies based on project type
@@ -258,12 +241,12 @@ def main():
     elif project_type == "go":
         go_module_path = detect_go_dependencies(project_dir)
         if go_module_path:
-            print(f"  Go Module    : {go_module_path}")
+            UI.print_item("Go Module", go_module_path)
     elif project_type == "python":
         detected_deps = detect_python_dependencies(project_dir)
     
     if detected_deps:
-        print(f"  Dependencies : {', '.join(detected_deps)}")
+        UI.print_item("Dependencies", ', '.join(detected_deps))
     
     # Recipe base content
     inherit_class = ""
@@ -284,16 +267,12 @@ def main():
     license_text = 'LICENSE = "CLOSED"'
     lic_file = project_dir / "LICENSE"
     if lic_file.exists():
-        # Ideally we'd calculate checksum, but for local dev "CLOSED" or "MIT" is common placeholder
         license_text = 'LICENSE = "MIT"\nLIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"'
         
     depends_str = ""
     if detected_deps:
         depends_str = f'DEPENDS = "{" ".join(detected_deps)}"'
 
-    # Points to local source
-    src_uri = f'SRC_URI = "file://${{THISDIR}}/{rel_project_path};subdir=${{BP}}"'
-    
     # Recipe Content
     recipe_content = f"""SUMMARY = "{project_name} application"
 {license_text}
@@ -308,7 +287,6 @@ EXTERNALSRC_BUILD = "${{WORKDIR}}/build"
 {depends_str}
 """
     
-    # Module specific adjustment
     if project_type == "module":
         recipe_content = f"""SUMMARY = "{project_name} kernel module"
 {license_text}
@@ -340,7 +318,6 @@ do_configure:prepend() {{
 # Kernel modules need to be installed in specific way if strict
 """
 
-    # Rust specific recipe
     elif project_type == "rust":
         recipe_content = f"""SUMMARY = "{project_name} Rust application"
 {license_text}
@@ -355,7 +332,6 @@ EXTERNALSRC_BUILD = "${{WORKDIR}}/build"
 {depends_str}
 """
 
-    # Go specific recipe
     elif project_type == "go":
         go_import = go_module_path if go_module_path else project_name
         recipe_content = f"""SUMMARY = "{project_name} Go application"
@@ -397,7 +373,6 @@ do_install() {{
 do_compile[network] = "1"
 """
 
-    # Python specific recipe
     elif project_type == "python":
         recipe_content = f"""SUMMARY = "{project_name} Python application"
 {license_text}
@@ -411,47 +386,45 @@ EXTERNALSRC = "${{THISDIR}}/{rel_project_path}"
 {depends_str}
 """
 
-
     with open(recipe_file, "w") as f:
         f.write(recipe_content)
 
-    print(f"\n{GREEN}Success! Created {project_type} recipe for '{project_name}'{NC}")
-    print(f"  Path         : {recipe_file}")
+    UI.print_success(f"Created {project_type} recipe for '{project_name}'")
+    UI.print_item("Path", str(recipe_file))
 
     # Image Integration
     # Default add_to_image to True if not a library and not explicitly set
-    add_to_image = args.add_to_image
-    if add_to_image is None:
-        add_to_image = not args.library
+    add_to_image_flag = args.add_to_image
+    if add_to_image_flag is None:
+        add_to_image_flag = not args.library
 
     image_name = None  # Initialize to avoid UnboundLocalError
-    if add_to_image:
+    if add_to_image_flag:
         image_name = args.image
         if not image_name:
-            image_name = yocto_utils.get_cached_image(workspace_root)
+            image_name = get_cached_image(workspace_root)
         
         if not image_name:
             # Try to find custom images
-            layer_path = yocto_utils.find_custom_layer(workspace_root)
-            images = yocto_utils.find_image_recipes(layer_path)
+            layer_path = find_custom_layer(workspace_root)
+            images = find_image_recipes(layer_path)
             if images:
                 image_name = images[0] # Default to first found
-                print(f"  Auto-selected image: {BOLD}{image_name}{NC}")
+                UI.print_item("Auto-selected image", image_name)
         
         if image_name:
-            print(f"  Integrating with image: {BOLD}{image_name}{NC}...")
-            if yocto_utils.add_package_to_image(workspace_root, image_name, project_name):
-                print(f"  {GREEN}Successfully added '{project_name}' to {image_name}{NC}")
-                yocto_utils.set_cached_image(workspace_root, image_name)
+            UI.print_item("Integration", f"Adding to {image_name}...")
+            if add_package_to_image(workspace_root, image_name, project_name):
+                UI.print_success(f"Successfully added '{project_name}' to {image_name}")
+                set_cached_image(workspace_root, image_name)
             else:
-                print(f"  {RED}Failed to add '{project_name}' to {image_name}{NC}")
+                UI.print_error(f"Failed to add '{project_name}' to {image_name}")
     else:
-        print(f"  Skipping image integration (package is a library or explicitly disabled)")
+        UI.print_item("Image Integration", "Skipped (library or disabled)")
 
-    print(f"\n{BOLD}Action Required:{NC}")
-    print(f"  Run '{GREEN}bitbake {project_name}{NC}' to build recipe.")
-    print(f"  Run '{GREEN}bitbake {image_name or 'core-image-falcon'}{NC}' to build image.")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    print(f"\n  {UI.BOLD}Action Required:{UI.NC}")
+    print(f"    Run 'yocto-build {project_name}' to build recipe.")
+    print(f"    Run 'yocto-build {image_name or 'core-image-falcon'}' to build image.")
 
 if __name__ == "__main__":
     main()

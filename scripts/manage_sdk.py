@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yocto_utils import (
+    UI,
     find_built_images,
     find_image_recipes,
     find_custom_layer,
@@ -13,6 +14,45 @@ from yocto_utils import (
     set_cached_image,
     select_image_interactive
 )
+
+def list_sdks(deploy_dir_sdk):
+    UI.print_item("Status", "Checking for SDK installers...")
+    
+    if not deploy_dir_sdk.exists():
+        UI.print_warning(f"No SDKs found in {deploy_dir_sdk}")
+        return
+
+    count = 0
+    for sdk_file in deploy_dir_sdk.glob("*.sh"):
+        UI.print_item("Installer", sdk_file.name)
+        print(f"      Path: {sdk_file}")
+        count += 1
+    
+    if count == 0:
+        UI.print_warning(f"No .sh installers found in {deploy_dir_sdk}")
+
+def build_sdk(image_name, deploy_dir_sdk, workspace_root):
+    UI.print_item("Target Image", image_name)
+    UI.print_item("Action", "Running populate_sdk (this may take 15-30+ minutes)...")
+    
+    try:
+        # We assume bitbake is in PATH (env sourced)
+        subprocess.run(["bitbake", "-c", "populate_sdk", image_name], check=True)
+        
+        UI.print_success("SDK generation complete")
+        UI.print_item("Location", str(deploy_dir_sdk))
+        
+        # Update cache on successful SDK build
+        set_cached_image(workspace_root, image_name)
+        
+    except subprocess.CalledProcessError:
+        UI.print_error("SDK generation failed.")
+        print(f"  Ensure BitBake environment is sourced and local layers are healthy.")
+        sys.exit(1)
+    except FileNotFoundError:
+        UI.print_error("BitBake command not found.")
+        print(f"  Please source environment (e.g. 'source scripts/env_init.sh') and try again.")
+        sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description="Manage Yocto cross-development SDKs")
@@ -23,32 +63,21 @@ def main():
     parser.add_argument("--no-cache", action="store_true", help="Ignore cached image preference")
     args = parser.parse_args()
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
+    UI.print_header("Yocto SDK Manager")
 
     workspace_root = Path(__file__).resolve().parent.parent
     poky_dir = workspace_root / "bitbake-builds" / "poky-master"
     deploy_dir_sdk = poky_dir / "build" / "tmp" / "deploy" / "sdk"
-    
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Yocto SDK & Toolchain Manager{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
 
     if args.list:
-        list_sdks(deploy_dir_sdk, BOLD, GREEN, NC)
-        print(f"{BOLD}{CYAN}=================================================={NC}")
+        list_sdks(deploy_dir_sdk)
         return
 
     # Smart image selection
     image_name = args.image
     
     if image_name is None and args.build:
-        print(f"  {BOLD}Auto-detecting image...{NC}")
+        UI.print_item("Status", "Auto-detecting image...")
         
         # Get cached image if not disabled
         cached_image = None if args.no_cache else get_cached_image(workspace_root)
@@ -61,91 +90,45 @@ def main():
             if args.interactive or len(built_images) > 1:
                 image_name = select_image_interactive(workspace_root, built_images, cached_image, purpose="build SDK")
                 if image_name is None:
-                    print(f"{BOLD}{RED}No image selected. Exiting.{NC}")
-                    sys.exit(1)
+                    UI.print_error("No image selected.", fatal=True)
             else:
                 # Single image - auto-select
                 image_name = built_images[0]['name']
-                print(f"  Auto-detected image: {BOLD}{image_name}{NC}")
+                UI.print_item("Auto-detected image", image_name)
         else:
             # No built images - check for recipes
-            print(f"  {YELLOW}No built images found.{NC}")
+            UI.print_warning("No built images found. Searching for recipes...")
             try:
                 layer_dir = find_custom_layer(workspace_root)
                 recipes = find_image_recipes(layer_dir)
                 
                 if recipes:
-                    print(f"  Found image recipes: {', '.join(recipes)}")
                     if len(recipes) == 1:
                         image_name = recipes[0]
-                        print(f"  Will use: {BOLD}{image_name}{NC}")
+                        UI.print_item("Selected recipe", image_name)
                     else:
-                        print(f"\n  Please specify which image to use:")
-                        for i, recipe in enumerate(recipes, 1):
-                            print(f"    {i}. {recipe}")
+                        UI.print_error("Multiple image recipes found. Please specify one.")
+                        for recipe in recipes:
+                            print(f"    - {recipe}")
                         sys.exit(1)
                 else:
-                    print(f"{BOLD}{RED}Error: No images or recipes found.{NC}")
-                    print(f"  Run '{GREEN}yocto-image{NC}' to create an image recipe first.")
+                    UI.print_error("No images or recipes found.")
+                    print(f"  Run 'yocto-image' to create an image recipe first.")
                     sys.exit(1)
             except RuntimeError as e:
-                print(f"{BOLD}{RED}Error: {e}{NC}")
-                sys.exit(1)
+                UI.print_error(str(e), fatal=True)
 
     if args.build:
         if image_name is None:
-            print(f"{BOLD}{RED}Error: No image specified or detected.{NC}")
-            sys.exit(1)
-        build_sdk(image_name, deploy_dir_sdk, workspace_root, BOLD, GREEN, NC)
+            UI.print_error("No image specified or detected.", fatal=True)
+        build_sdk(image_name, deploy_dir_sdk, workspace_root)
     else:
         # Show usage
         if image_name:
-            print(f"  Target Image : {BOLD}{image_name}{NC}")
-        print(f"\n  {BOLD}Usage:{NC}")
-        print(f"    yocto-sdk --build      : Build SDK for {'detected' if image_name is None else image_name} image")
-        print(f"    yocto-sdk --list       : Show available installers")
-    
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-
-def list_sdks(deploy_dir_sdk, BOLD, GREEN, NC):
-    print(f"  {BOLD}Available SDK Installers:{NC}")
-    
-    if not deploy_dir_sdk.exists():
-        print(f"    (No SDKs found in {deploy_dir_sdk})")
-        return
-
-    count = 0
-    for sdk_file in deploy_dir_sdk.glob("*.sh"):
-        print(f"    {GREEN}{sdk_file.name}{NC}")
-        print(f"      Path: {sdk_file}")
-        count += 1
-    
-    if count == 0:
-        print(f"    (No .sh installers found in {deploy_dir_sdk})")
-
-def build_sdk(image_name, deploy_dir_sdk, workspace_root, BOLD, GREEN, NC):
-    print(f"  Target Image : {BOLD}{image_name}{NC}")
-    print(f"  Action       : Running populate_sdk (this will take time)...")
-    
-    try:
-        # We assume bitbake is in PATH (env sourced)
-        subprocess.run(["bitbake", "-c", "populate_sdk", image_name], check=True)
-        
-        print(f"\n{GREEN}Success! SDK generated.{NC}")
-        print(f"  {BOLD}Installers available in:{NC}")
-        print(f"    {deploy_dir_sdk}")
-        
-        # Update cache on successful SDK build
-        set_cached_image(workspace_root, image_name)
-        
-    except subprocess.CalledProcessError as e:
-        print(f"\n  {BOLD}Error:{NC} SDK generation failed.")
-        print(f"  Ensure BitBake environment is sourced and local layers are healthy.")
-        sys.exit(1)
-    except FileNotFoundError:
-        print(f"\n  {BOLD}Error:{NC} BitBake command not found.")
-        print(f"  Please source and try again.")
-        sys.exit(1)
+            UI.print_item("Target Image", image_name)
+        print(f"\n  {UI.BOLD}Commands:{UI.NC}")
+        print(f"    --build      Build SDK package")
+        print(f"    --list       Show installers")
 
 if __name__ == "__main__":
     main()

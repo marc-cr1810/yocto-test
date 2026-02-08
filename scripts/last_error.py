@@ -3,6 +3,10 @@ import os
 import sys
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Show the last Yocto build error")
@@ -11,20 +15,10 @@ def main():
     workspace_root = Path(__file__).resolve().parent.parent
     build_tmp_work = workspace_root / "bitbake-builds" / "poky-master" / "build" / "tmp" / "work"
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Latest Build Error Diagnosis{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header("Latest Build Error Diagnosis")
 
     if not build_tmp_work.exists():
-        print(f"  {RED}Error: Build work directory not found at {build_tmp_work}{NC}")
-        sys.exit(1)
+        UI.print_error(f"Build work directory not found at {build_tmp_work}", fatal=True)
 
     print("  Searching for the latest failed task log...")
     
@@ -44,20 +38,18 @@ def main():
                     if log_path.is_file():
                         log_files.append(log_path)
     except Exception as e:
-        print(f"  {RED}Error searching for logs: {e}{NC}")
-        sys.exit(1)
+        UI.print_error(f"Error searching for logs: {e}", fatal=True)
 
     if not log_files:
-        print(f"  {BOLD}Status       : No task logs found.{NC}")
+        UI.print_item("Status", "No task logs found.")
         sys.exit(0)
 
     # Find the latest log by modification time
     latest_log = max(log_files, key=lambda p: p.stat().st_mtime)
 
-    print(f"  Latest Log   : {BOLD}{latest_log.name}{NC}")
-    print(f"  Path         : {latest_log}")
-    print(f"{BOLD}{CYAN}--------------------------------------------------{NC}")
-
+    UI.print_item("Latest Log", latest_log.name)
+    UI.print_item("Path", str(latest_log))
+    
     # Check for actual errors in the log
     has_error = False
     try:
@@ -68,19 +60,17 @@ def main():
             
             if error_lines:
                 has_error = True
-                print(f"{RED}{BOLD}Detected Error Snippet:{NC}")
+                print(f"{UI.RED}{UI.BOLD}Detected Error Snippet:{UI.NC}")
                 # Show up to 15 lines around the first error or the last few lines
                 for line in error_lines[-10:]:
                     print(line.strip())
             else:
-                print(f"{BOLD}No obvious error markers in the latest log. End of file:{NC}")
+                print(f"{UI.BOLD}No obvious error markers in the latest log. End of file:{UI.NC}")
                 # Sometimes the error is at the end of the log without a specific marker
                 for line in lines[-20:]:
                     print(line.strip())
     except Exception as e:
-        print(f"  {RED}Could not read log file: {e}{NC}")
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+        UI.print_error(f"Could not read log file: {e}")
 
 if __name__ == "__main__":
     main()

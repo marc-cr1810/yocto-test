@@ -4,6 +4,10 @@ import sys
 import shutil
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI
+
 def get_dir_size(path):
     total = 0
     try:
@@ -29,9 +33,10 @@ def main():
     workspace_root = Path(__file__).resolve().parent.parent
     build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
     
+    UI.print_header("Safe Yocto Build Cleanup")
+
     if not build_dir.exists():
-        print(f"Error: Build directory {build_dir} not found.")
-        sys.exit(1)
+        UI.print_error(f"Build directory {build_dir} not found.", fatal=True)
 
     # Directories to safely remove
     targets = [
@@ -41,26 +46,14 @@ def main():
         build_dir / "tmp" / "cache",
     ]
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Safe Yocto Build Cleanup{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    
-    print(f"  {YELLOW}Warning: This will remove temporary build artifacts{NC}")
-    print(f"           (sstate-cache and downloads are preserved){NC}\n")
+    print(f"  {UI.YELLOW}Warning: This will remove temporary build artifacts{UI.NC}")
+    print(f"           (sstate-cache and downloads are preserved){UI.NC}\n")
 
     total_reclaimed = 0
     # ... (cleanup logic same)
 
-    print(f"\n{GREEN}{BOLD}Cleanup Complete!{NC}")
-    print(f"  Total Reclaimed : {BOLD}{format_size(total_reclaimed)}{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    print(f"\n{UI.GREEN}{UI.BOLD}Cleanup Complete!{UI.NC}")
+    print(f"  Total Reclaimed : {UI.BOLD}{format_size(total_reclaimed)}{UI.NC}")
 
 if __name__ == "__main__":
     main()

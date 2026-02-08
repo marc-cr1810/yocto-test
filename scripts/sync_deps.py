@@ -4,6 +4,10 @@ import sys
 import re
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI, find_custom_layer, get_all_custom_layers, get_cached_layer
+
 # Special case mappings (only for packages that don't follow the lowercase convention)
 CMAKE_TO_YOCTO_MAP = {
     "OpenSSL": "openssl",
@@ -108,30 +112,19 @@ def main():
     parser.add_argument("--layer", default=None, help="Layer name to use (default: auto-detect)")
     args = parser.parse_args()
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
-
     workspace_root = Path(__file__).resolve().parent.parent
     sw_dir = workspace_root / "sw"
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     
     # Smart layer detection
     if args.layer:
-        from yocto_utils import find_custom_layer
         layer_dir = find_custom_layer(workspace_root, args.layer)
     else:
-        from yocto_utils import get_all_custom_layers, get_cached_layer
-        
         cached_layer = get_cached_layer(workspace_root)
         all_layers = get_all_custom_layers(workspace_root)
         
         if not all_layers:
-            print(f"{BOLD}{RED}Error: No custom layers found.{NC}")
-            print(f"  Run '{GREEN}yocto-layers --new <name>{NC}' to create a layer first.")
+            UI.print_error("No custom layers found.")
+            print(f"  Run '{UI.GREEN}yocto-layers --new <name>{UI.NC}' to create a layer first.")
             sys.exit(1)
         
         if len(all_layers) == 1:
@@ -144,10 +137,8 @@ def main():
             # Multiple layers, use first one
             layer_dir = all_layers[0]
     
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Synchronizing Workspace Dependencies{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"  Layer        : {BOLD}{layer_dir.name}{NC}")
+    UI.print_header("Synchronizing Workspace Dependencies")
+    UI.print_item("Layer", layer_dir.name)
     
     updated_count = 0
     # Recursively scan all subdirectories in sw/ including language-specific folders
@@ -168,13 +159,12 @@ def main():
             
         detected_deps = detect_dependencies(project_dir, workspace_root, layer_dir)
         if update_recipe(recipe_file, detected_deps):
-            print(f"  {GREEN}[UPDATED]{NC} {project_name:15} -> {', '.join(detected_deps)}")
+            print(f"  {UI.GREEN}[UPDATED]{UI.NC} {project_name:15} -> {', '.join(detected_deps)}")
             updated_count += 1
         else:
             print(f"  [ OK ]    {project_name:15}")
                 
-    print(f"\n{GREEN}Done. Updated {updated_count} recipes.{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    print(f"\n{UI.GREEN}Done. Updated {updated_count} recipes.{UI.NC}")
 
 if __name__ == "__main__":
     main()

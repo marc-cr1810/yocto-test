@@ -7,13 +7,66 @@ from pathlib import Path
 from typing import List, Optional
 import re
 import subprocess
+import sys
+
+class UI:
+    """Centralized UI styling and output utilities."""
+    BOLD = '\033[1m'
+    CYAN = '\033[0;36m'
+    GREEN = '\033[0;32m'
+    RED = '\033[0;31m'
+    YELLOW = '\033[1;33m'
+    DIM = '\033[2m'
+    NC = '\033[0m' # No Color
+    
+    # Handle environment without color
+    if not sys.stdout.isatty():
+        BOLD = CYAN = GREEN = RED = YELLOW = DIM = NC = ''
+
+    @classmethod
+    def print_header(cls, text: str):
+        """Print a clean, professional header."""
+        print(f"\n{cls.BOLD}{cls.CYAN}# {text}{cls.NC}")
+
+    @classmethod
+    def print_success(cls, text: str):
+        """Print a success message."""
+        print(f"  {cls.GREEN}[OK]{cls.NC} {text}")
+
+    @classmethod
+    def print_warning(cls, text: str):
+        """Print a warning message."""
+        print(f"  {cls.YELLOW}[WARN]{cls.NC} {text}")
+
+    @classmethod
+    def print_error(cls, text: str, fatal: bool = False):
+        """Print an error message."""
+        print(f"  {cls.RED}[ERROR]{cls.NC} {text}")
+        if fatal:
+            sys.exit(1)
+
+    @classmethod
+    def print_item(cls, label: str, value: str = "", indent: int = 1):
+        """Print a labeled data item."""
+        spaces = "  " * indent
+        if value:
+            print(f"{spaces}{cls.DIM}{label:14}:{cls.NC} {cls.BOLD}{value}{cls.NC}")
+        else:
+            print(f"{spaces}{cls.BOLD}{label}{cls.NC}")
+
+    @classmethod
+    def print_footer(cls):
+        """Minimal footer to separate sections if needed."""
+        # Optional: could be empty or a subtle divider
+        pass
 
 def run_command(cmd, cwd=None):
     try:
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, cwd=cwd)
         return result.stdout.strip()
-    except subprocess.CalledProcessError:
-        return None
+    except subprocess.CalledProcessError as e:
+        # Return error details so caller can handle or display them
+        return f"ERROR: {e}\nOutput: {e.stdout}\nError: {e.stderr}"
 
 def get_all_custom_layers(workspace_root: Path) -> List[Path]:
     """

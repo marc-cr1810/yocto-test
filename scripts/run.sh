@@ -1,16 +1,4 @@
 #!/bin/bash
-
-# ANSI Colors
-BOLD='\033[1m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-echo -e "${BOLD}${CYAN}==================================================${NC}"
-echo -e "${BOLD}${CYAN}   QEMU Environment Launcher${NC}"
-echo -e "${BOLD}${CYAN}==================================================${NC}"
-
-source bitbake-builds/poky-master/build/init-build-env
-
-runqemu snapshot nographic core-image-falcon
-
-echo -e "${BOLD}${CYAN}==================================================${NC}"
+# Wrapper for the Python QEMU runner
+SCRIPT_DIR=$(dirname "$0")
+python3 "$SCRIPT_DIR/run_qemu.py" "$@"

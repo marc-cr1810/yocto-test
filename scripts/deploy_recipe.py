@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 import sys
+import os
 import subprocess
 import argparse
 import shutil
 from pathlib import Path
+
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI
 
 def main():
     parser = argparse.ArgumentParser(description="Build and deploy a Yocto recipe to an installation directory or remote target")
@@ -15,19 +20,10 @@ def main():
     parser.add_argument("--ssh-opts", default="", help="Additional SSH options (e.g., '-p 2222 -i key.pem')")
     args = parser.parse_args()
     
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    NC = '\033[0m'
-    
     workspace_root = Path(__file__).resolve().parent.parent
     
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Build and Deploy Recipe{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"  Target       : {BOLD}{args.target}{NC}")
+    UI.print_header("Build and Deploy Recipe")
+    UI.print_item("Target", args.target)
     
     # Determine destination
     if args.dest:
@@ -35,23 +31,24 @@ def main():
     else:
         dest_dir = workspace_root / "deploy" / args.target
     
-    print(f"  Destination  : {BOLD}{dest_dir}{NC}")
+    UI.print_item("Destination", str(dest_dir))
     
     # Build if not skipped
     if not args.no_build:
         if args.clean:
-            print(f"\n{BOLD}Cleaning...{NC}")
+            UI.print_item("Action", "Cleaning...")
             subprocess.run(["bitbake", "-c", "clean", args.target])
         
-        print(f"\n{BOLD}Building...{NC}")
+        UI.print_item("Action", "Building...")
         result = subprocess.run(["bitbake", args.target])
         
         if result.returncode != 0:
-            print(f"\n{BOLD}Build failed. Check logs with {GREEN}yocto-err{NC}")
+            UI.print_error("Build failed.")
+            print(f"  Check logs with {UI.GREEN}yocto-err{UI.NC}")
             sys.exit(1)
     
     # Find the recipe's deploy directory
-    print(f"\n{BOLD}Deploying artifacts...{NC}")
+    UI.print_item("Status", "Deploying artifacts...")
     
     # Get TMPDIR from bitbake environment
     result = subprocess.run(
@@ -61,9 +58,8 @@ def main():
     )
     
     if result.returncode != 0:
-        print(f"{BOLD}Error: Could not get recipe environment{NC}")
+        UI.print_error("Could not get recipe environment")
         sys.exit(1)
-    
     
     # Parse WORKDIR from bitbake -e output (most reliable)
     workdir = None
@@ -76,16 +72,16 @@ def main():
             tmpdir = line.split('=', 1)[1].strip('"')
     
     if not workdir:
-        print(f"{BOLD}Error: Could not determine WORKDIR{NC}")
-        print(f"{YELLOW}Tip: Make sure the recipe exists and built successfully{NC}")
+        UI.print_error("Could not determine WORKDIR")
+        UI.print_warning("Make sure the recipe exists and built successfully")
         sys.exit(1)
     
     # The work directory contains the recipe's build artifacts
     deploy_dir = Path(workdir)
     
     if not deploy_dir.exists():
-        print(f"{YELLOW}Warning: Work directory does not exist: {deploy_dir}{NC}")
-        print(f"\n{BOLD}Tip:{NC} Check if the recipe built successfully with {GREEN}bitbake {args.target}{NC}")
+        UI.print_warning(f"Work directory does not exist: {deploy_dir}")
+        print(f"  Check if the recipe built successfully with {UI.GREEN}bitbake {args.target}{UI.NC}")
         sys.exit(1)
     
     # Find the image/packages directory
@@ -107,8 +103,8 @@ def main():
             remote_host = args.remote
             remote_path = '/'
         
-        print(f"  Remote Host  : {BOLD}{remote_host}{NC}")
-        print(f"  Remote Path  : {BOLD}{remote_path}{NC}")
+        UI.print_item("Remote Host", remote_host)
+        UI.print_item("Remote Path", remote_path)
     else:
         dest_dir.mkdir(parents=True, exist_ok=True)
     
@@ -125,7 +121,7 @@ def main():
     
     # Deploy from image directory (preferred - contains installed files)
     if image_dir.exists():
-        print(f"  Copying from image directory...")
+        UI.print_item("Source", "image directory")
         for item in image_dir.rglob("*"):
             if item.is_file():
                 rel_path = item.relative_to(image_dir)
@@ -135,13 +131,13 @@ def main():
                 deployed_count += 1
                 # Show actual install path for remote, relative path for local
                 if is_remote:
-                    print(f"    {remote_path.rstrip('/')}/{rel_path}")
+                    print(f"      {remote_path.rstrip('/')}/{rel_path}")
                 else:
-                    print(f"    {rel_path}")
+                    print(f"      {rel_path}")
     
     # Also check packages-split for additional files
     elif packages_split.exists():
-        print(f"  Copying from packages-split...")
+        UI.print_item("Source", "packages-split")
         for package_dir in packages_split.iterdir():
             if package_dir.is_dir():
                 for item in package_dir.rglob("*"):
@@ -153,16 +149,16 @@ def main():
                         deployed_count += 1
                         # Show actual install path for remote, relative path for local
                         if is_remote:
-                            print(f"    {remote_path.rstrip('/')}/{rel_path}")
+                            print(f"      {remote_path.rstrip('/')}/{rel_path}")
                         else:
-                            print(f"    {rel_path}")
+                            print(f"      {rel_path}")
     else:
-        print(f"{YELLOW}Warning: No image or packages-split directory found{NC}")
+        UI.print_warning("No image or packages-split directory found")
         print(f"  This recipe may not install any files.")
     
     # If remote, use rsync to transfer (with scp fallback)
     if is_remote and deployed_count > 0:
-        print(f"\n{BOLD}Transferring to remote target...{NC}")
+        UI.print_item("Action", "Transferring to remote target...")
         
         # Try rsync first (faster and more efficient)
         rsync_cmd = ["rsync", "-avz", "--progress"]
@@ -180,7 +176,7 @@ def main():
         # If rsync failed, try scp as fallback
         if result.returncode != 0:
             if "rsync: not found" in result.stderr or "command not found" in result.stderr:
-                print(f"{YELLOW}  rsync not available on target, using scp...{NC}")
+                UI.print_warning("rsync not available on target, using scp...")
                 
                 # Use tar + ssh for efficient directory transfer
                 tar_cmd = ["tar", "-czf", "-", "-C", str(temp_deploy_dir), "."]
@@ -202,29 +198,25 @@ def main():
                 shutil.rmtree(temp_deploy_dir)
                 
                 if ssh_proc.returncode != 0:
-                    print(f"\n{BOLD}Error: Remote transfer failed{NC}")
+                    UI.print_error("Remote transfer failed")
                     if stderr:
-                        print(f"{stderr.decode()}")
+                        print(f"      {stderr.decode()}")
                     sys.exit(1)
             else:
                 # Clean up temp directory
                 shutil.rmtree(temp_deploy_dir)
-                print(f"\n{BOLD}Error: Remote transfer failed{NC}")
-                print(f"{result.stderr}")
+                UI.print_error("Remote transfer failed")
+                print(f"      {result.stderr}")
                 sys.exit(1)
         else:
             # Clean up temp directory after successful rsync
             shutil.rmtree(temp_deploy_dir)
         
-        print(f"\n{GREEN}Success! Deployed {deployed_count} files to remote target:{NC}")
-        print(f"  {args.remote}")
+        UI.print_success(f"Deployed {deployed_count} files to {args.remote}")
     elif deployed_count > 0:
-        print(f"\n{GREEN}Success! Deployed {deployed_count} files to:{NC}")
-        print(f"  {dest_dir}")
+        UI.print_success(f"Deployed {deployed_count} files to {dest_dir}")
     else:
-        print(f"\n{YELLOW}No files deployed. Recipe may not install anything.{NC}")
-    
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+        UI.print_warning("No files deployed. Recipe may not install anything.")
 
 if __name__ == "__main__":
     main()

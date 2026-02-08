@@ -5,6 +5,10 @@ import argparse
 import subprocess
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI
+
 def main():
     parser = argparse.ArgumentParser(description="Simplify local development using Yocto's devtool")
     parser.add_argument("recipe", help="Recipe name to modify")
@@ -12,30 +16,18 @@ def main():
     parser.add_argument("--stop", action="store_true", help="Stop modifying (reset) the recipe")
     args = parser.parse_args()
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Yocto Devtool Live-Edit Mode{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header("Yocto Devtool Live-Edit Mode")
 
     workspace_root = Path(__file__).resolve().parent.parent
 
     if args.stop:
-        print(f"  Status       : Resetting {BOLD}{args.recipe}{NC}...")
+        UI.print_item("Status", f"Resetting {UI.BOLD}{args.recipe}{UI.NC}...")
         try:
             subprocess.run(["devtool", "reset", args.recipe], check=True, capture_output=True)
-            print(f"\n{GREEN}Success! {args.recipe} is no longer in development mode.{NC}")
+            UI.print_success(f"{args.recipe} is no longer in development mode.")
         except subprocess.CalledProcessError as e:
-            print(f"  {RED}Error: {e.stderr.decode() if e.stderr else e}{NC}")
+            UI.print_error(f"{e.stderr.decode() if e.stderr else e}")
             sys.exit(1)
-        print(f"{BOLD}{CYAN}=================================================={NC}")
         sys.exit(0)
 
     # Finding the source
@@ -45,24 +37,21 @@ def main():
         src_path = workspace_root / "sw" / args.recipe
 
     if not src_path.exists():
-        print(f"  {RED}Error: Source path {src_path} does not exist.{NC}")
-        sys.exit(1)
+        UI.print_error(f"Source path {src_path} does not exist.", fatal=True)
 
-    print(f"  Target       : {BOLD}{args.recipe}{NC}")
-    print(f"  Source Path  : {src_path}")
-    print(f"  Status       : Enabling development mode...")
+    UI.print_item("Target", args.recipe)
+    UI.print_item("Source Path", str(src_path))
+    UI.print_item("Status", "Enabling development mode...")
     
     try:
         subprocess.run(["devtool", "modify", args.recipe, str(src_path)], check=True, capture_output=True)
-        print(f"\n{GREEN}Success! Live-edit enabled.{NC}")
-        print(f"  {BOLD}Edit Files   :{NC} {src_path}")
-        print(f"  {BOLD}Rebuild Tool :{NC} Run '{GREEN}bitbake {args.recipe}{NC}'")
+        UI.print_success("Live-edit enabled.")
+        UI.print_item("Edit Files", str(src_path))
+        print(f"  {UI.BOLD}Rebuild Tool :{UI.NC} Run '{UI.GREEN}yocto-build {args.recipe}{UI.NC}'")
     except subprocess.CalledProcessError as e:
-        print(f"  {RED}Error: {e.stderr.decode() if e.stderr else e}{NC}")
-        print(f"\n  {BOLD}Note:{NC} Ensure BitBake environment is sourced.")
+        UI.print_error(f"{e.stderr.decode() if e.stderr else e}")
+        print(f"\n  {UI.BOLD}Note:{UI.NC} Ensure BitBake environment is sourced.")
         sys.exit(1)
     
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-
 if __name__ == "__main__":
     main()

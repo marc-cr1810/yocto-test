@@ -9,15 +9,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yocto_utils import (
     get_cached_layer,
     set_cached_layer,
-    select_layer_interactive
+    select_layer_interactive,
+    get_all_custom_layers,
+    run_command,
+    UI
 )
-
-def run_command(cmd, cwd=None):
-    try:
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, cwd=cwd)
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        return f"ERROR: {e}\nOutput: {e.stdout}\nError: {e.stderr}"
 
 def main():
     parser = argparse.ArgumentParser(description="Manage local Yocto layers")
@@ -29,55 +25,38 @@ def main():
     parser.add_argument("--no-cache", action="store_true", help="Ignore cached layer preference")
     args = parser.parse_args()
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    YELLOW = '\033[1;33m'
-    NC = '\033[0m'
-
     workspace_root = Path(__file__).resolve().parent.parent
     layers_base = workspace_root / "yocto" / "layers"
     
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Yocto Layer Management & Registration{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header("Yocto Layer Management")
 
     if args.new:
-        scaffold_layer(args.new, layers_base, BOLD, GREEN, CYAN, NC)
-        print(f"{BOLD}{CYAN}=================================================={NC}")
+        scaffold_layer(args.new, layers_base)
         return
 
     # Handle --info command
     if args.info is not None:
-        layer = get_layer_for_command(workspace_root, args.info, args.interactive, args.no_cache, BOLD, GREEN, RED, NC)
+        layer = get_layer_for_command(workspace_root, args.info, args.interactive, args.no_cache)
         if layer:
-            show_layer_info(layer, BOLD, GREEN, CYAN, NC)
+            show_layer_info(layer)
             set_cached_layer(workspace_root, layer.name)
-        print(f"{BOLD}{CYAN}=================================================={NC}")
         return
 
     # Handle --recipes command
     if args.recipes is not None:
-        layer = get_layer_for_command(workspace_root, args.recipes, args.interactive, args.no_cache, BOLD, GREEN, RED, NC)
+        layer = get_layer_for_command(workspace_root, args.recipes, args.interactive, args.no_cache)
         if layer:
-            list_layer_recipes(layer, BOLD, GREEN, CYAN, NC)
+            list_layer_recipes(layer)
             set_cached_layer(workspace_root, layer.name)
-        print(f"{BOLD}{CYAN}=================================================={NC}")
         return
 
     if not layers_base.is_dir():
-        print(f"  {RED}Error: {layers_base} not found{NC}")
-        print(f"{BOLD}{CYAN}=================================================={NC}")
-        sys.exit(1)
+        UI.print_error(f"Layers directory not found: {layers_base}", fatal=True)
 
     # Default: Management Logic (Syncing layers)
-    sync_layers(workspace_root, layers_base, BOLD, GREEN, RED, NC)
-    
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    sync_layers(workspace_root, layers_base)
 
-def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache, BOLD, GREEN, RED, NC):
+def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache):
     """
     Get a layer for a command that operates on a single layer.
     Returns the layer Path or None if error.
@@ -85,8 +64,8 @@ def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache, BOLD
     all_layers = get_all_custom_layers(workspace_root)
     
     if not all_layers:
-        print(f"  {RED}Error: No custom layers found.{NC}")
-        print(f"  Run '{GREEN}yocto-layers --new <name>{NC}' to create a layer first.")
+        UI.print_error("No custom layers found.")
+        print(f"  Run 'yocto-layers --new <name>' to create a layer first.")
         return None
     
     # If layer explicitly specified
@@ -95,7 +74,7 @@ def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache, BOLD
         for layer in all_layers:
             if layer.name == layer_name:
                 return layer
-        print(f"  {RED}Error: Layer '{layer_name}' not found.{NC}")
+        UI.print_error(f"Layer '{layer_name}' not found.")
         return None
     
     # Auto-detect layer
@@ -106,13 +85,13 @@ def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache, BOLD
         return select_layer_interactive(workspace_root, all_layers, cached_layer)
     else:
         # Single layer - auto-select
-        print(f"  Auto-detected layer: {BOLD}{all_layers[0].name}{NC}")
+        UI.print_item("Auto-detected", all_layers[0].name)
         return all_layers[0]
 
-def show_layer_info(layer_path, BOLD, GREEN, CYAN, NC):
+def show_layer_info(layer_path):
     """Show detailed information about a layer."""
-    print(f"  Layer Name   : {BOLD}{layer_path.name}{NC}")
-    print(f"  Path         : {layer_path}")
+    UI.print_item("Layer Name", layer_path.name)
+    UI.print_item("Path", str(layer_path))
     
     # Count recipes by type
     recipe_dirs = {}
@@ -126,23 +105,23 @@ def show_layer_info(layer_path, BOLD, GREEN, CYAN, NC):
                 recipe_dirs[category] = count
                 total_recipes += count
     
-    print(f"  Total Recipes: {BOLD}{total_recipes}{NC}")
+    UI.print_item("Total Recipes", str(total_recipes))
     
     if recipe_dirs:
-        print(f"\n  {BOLD}Recipe Categories:{NC}")
+        print(f"\n  {UI.BOLD}Recipe Categories:{UI.NC}")
         for category, count in sorted(recipe_dirs.items()):
-            print(f"    {GREEN}{category:<15}{NC} : {count} recipes")
+            print(f"    {UI.GREEN}{category:<15}{UI.NC} : {count} recipes")
     
     # Check for layer.conf
     layer_conf = layer_path / "conf" / "layer.conf"
     if layer_conf.exists():
-        print(f"\n  {GREEN}✓{NC} Layer configuration found")
+        UI.print_success("Layer configuration found")
     else:
-        print(f"\n  {CYAN}⚠{NC} No layer.conf found")
+        UI.print_warning("No layer.conf found")
 
-def list_layer_recipes(layer_path, BOLD, GREEN, CYAN, NC):
+def list_layer_recipes(layer_path):
     """List all recipes in a layer."""
-    print(f"  Layer        : {BOLD}{layer_path.name}{NC}")
+    UI.print_item("Layer", layer_path.name)
     
     recipes_found = False
     
@@ -153,25 +132,25 @@ def list_layer_recipes(layer_path, BOLD, GREEN, CYAN, NC):
             
             if recipes:
                 recipes_found = True
-                print(f"\n  {BOLD}{category}:{NC}")
+                print(f"\n  {UI.BOLD}{category}:{UI.NC}")
                 for recipe in sorted(recipes):
                     recipe_name = recipe.stem
-                    print(f"    {GREEN}{recipe_name}{NC}")
+                    print(f"    {UI.GREEN}{recipe_name}{UI.NC}")
     
     if not recipes_found:
-        print(f"\n  {CYAN}No recipes found in this layer.{NC}")
+        UI.print_warning("No recipes found in this layer.")
 
-def sync_layers(workspace_root, layers_base, BOLD, GREEN, RED, NC):
+def sync_layers(workspace_root, layers_base):
     # Find local layers
     local_layers = [d for d in layers_base.iterdir() if d.is_dir() and d.name.startswith("meta-")]
-    print(f"  Available     : {len(local_layers)} local layers found")
+    UI.print_item("Available", f"{len(local_layers)} local layers found")
     
     # Check currently active layers
     check_layers = run_command("bitbake-layers show-layers")
     
     if "ERROR: The BBPATH variable is not set" in check_layers:
-        print(f"\n  {RED}Error: BitBake environment not detected.{NC}")
-        print(f"  Please source the environment first (e.g., '{GREEN}source scripts/env_init.sh{NC}')")
+        UI.print_error("BitBake environment not detected.")
+        print(f"  Please source the environment first (e.g., 'source scripts/env_init.sh')")
         return
 
     active_layers = check_layers.splitlines()
@@ -189,34 +168,34 @@ def sync_layers(workspace_root, layers_base, BOLD, GREEN, RED, NC):
         is_active = any(layer_abs_path in line for line in active_layers)
         
         if is_active:
-            print(f"  Layer '{layer_path.name}' : {GREEN}ACTIVE{NC}")
+            print(f"  Layer '{layer_path.name}' : {UI.GREEN}ACTIVE{UI.NC}")
         else:
             print(f"  Adding layer '{layer_path.name}'...")
             # Use relative path if possible
             output = run_command(f"bitbake-layers add-layer {layer_rel_path}", cwd=build_dir)
             if "ERROR" in output:
-                print(f"  {RED}[FAIL] Failed to add layer: {output.strip()}{NC}")
+                UI.print_error(f"Failed to add layer: {output.strip()}")
             else:
-                print(f"  {GREEN}[SUCCESS] Added layer '{layer_path.name}'.{NC}")
+                UI.print_success(f"Added layer '{layer_path.name}'")
 
-    print(f"\n{BOLD}Active Layer Configuration:{NC}")
+    UI.print_header("Active Layer Configuration")
     # Extract only the summary from show-layers to keep output clean
     layers_summary = run_command("bitbake-layers show-layers")
     for line in layers_summary.splitlines():
         if line.startswith("meta-") or "layer" in line.lower():
             print(f"    {line}")
 
-def scaffold_layer(name, layers_base, BOLD, GREEN, CYAN, NC):
+def scaffold_layer(name, layers_base):
     if not name.startswith("meta-"):
         name = f"meta-{name}"
     
     layer_dir = layers_base / name
     if layer_dir.exists():
-        print(f"  {BOLD}Error        :{NC} Layer '{name}' already exists.")
+        UI.print_error(f"Layer '{name}' already exists.")
         return
 
-    print(f"  New Layer    : {BOLD}{name}{NC}")
-    print(f"  Status       : Creating directory structure...")
+    UI.print_item("New Layer", name)
+    UI.print_item("Status", "Creating directory structure...")
     
     # Create structure
     (layer_dir / "conf").mkdir(parents=True, exist_ok=True)
@@ -243,10 +222,9 @@ LAYERSERIES_COMPAT_{name.replace('meta-', '')} = "whinlatter"
     with open(layer_dir / "README", "w") as f:
         f.write(f"This is the {name} layer.\n")
 
-    print(f"  {GREEN}Success! Layer scaffolded at:{NC}")
-    print(f"    {layer_dir}")
-    print(f"\n  {BOLD}Next Steps:{NC}")
-    print(f"    Run '{GREEN}yocto-layers{NC}' to register it with your build.")
+    UI.print_success(f"Layer scaffolded at: {layer_dir}")
+    print(f"\n  {UI.BOLD}Next Steps:{UI.NC}")
+    print(f"    Run 'yocto-layers' to register it with your build.")
 
 if __name__ == "__main__":
     main()

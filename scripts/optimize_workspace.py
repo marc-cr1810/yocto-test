@@ -4,6 +4,10 @@ import sys
 import multiprocessing
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Optimize Yocto local.conf settings")
@@ -12,11 +16,12 @@ def main():
     workspace_root = Path(__file__).resolve().parent.parent
     local_conf = workspace_root / "bitbake-builds" / "poky-master" / "build" / "conf" / "local.conf"
 
-    if not local_conf.exists():
-        print(f"Error: Could not find {local_conf}")
-        sys.exit(1)
+    UI.print_header("Optimizing Workspace Configuration")
 
-    print(f"Optimizing {local_conf}...")
+    if not local_conf.exists():
+        UI.print_error(f"Could not find {local_conf}", fatal=True)
+
+    UI.print_item("Target", str(local_conf))
 
     # Shared directories (relative to build/ which is ${TOPDIR})
     # build is at bitbake-builds/poky-master/build
@@ -71,22 +76,9 @@ def main():
     with open(local_conf, "w") as f:
         f.writelines(new_lines)
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Optimizing Workspace Configuration{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-
-    # ... (rest of the logic remains same, just updating prints at the end)
-
-    print(f"\n{GREEN}Success! Applied optimization settings:{NC}")
+    print(f"\n{UI.GREEN}Success! Applied optimization settings:{UI.NC}")
     for key, value in settings.items():
-        print(f"  {BOLD}{key:20}{NC} = {value}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+        print(f"  {UI.BOLD}{key:20}{UI.NC} = {value}")
 
 if __name__ == "__main__":
     main()

@@ -31,5 +31,6 @@
     "python.analysis.extraPaths": [
         "${workspaceFolder}/bitbake-builds/poky-master/layers/bitbake/lib",
         "${workspaceFolder}/bitbake-builds/poky-master/layers/meta/lib"
-    ]
+    ],
+    "cmake.sourceDirectory": "/home/marc/proj/yocto-test/bitbake-builds/poky-master/build/tmp/work-shared/llvm-project-source-21.1.8-r1/sources/llvm-project-21.1.8.src/cross-project-tests"
 }

@@ -5,6 +5,10 @@ import argparse
 import subprocess
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI, get_all_custom_layers, get_cached_layer
+
 def main():
     parser = argparse.ArgumentParser(description="Scaffold a new project (C++, Rust, Go, Python, or Kernel Module) and add it to Yocto")
     parser.add_argument("name", help="Name of the new project")
@@ -14,16 +18,7 @@ def main():
     parser.add_argument("--library", action="store_true", help="Create a library instead of an executable")
     args = parser.parse_args()
 
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Scaffolding New Project ({args.type}){NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
+    UI.print_header(f"Scaffolding Project")
 
     workspace_root = Path(__file__).resolve().parent.parent
     
@@ -42,39 +37,35 @@ def main():
     project_name = args.name
 
     if sw_dir.exists():
-        print(f"Error: Project directory {sw_dir} already exists.")
-        sys.exit(1)
+        UI.print_error(f"Project directory {sw_dir} already exists.", fatal=True)
 
     # Auto-detect layer if not specified
     layer_name = args.layer
     if layer_name is None:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from yocto_utils import get_all_custom_layers, get_cached_layer, select_layer_interactive
-        
         cached_layer = get_cached_layer(workspace_root)
         all_layers = get_all_custom_layers(workspace_root)
         
         if not all_layers:
-            print(f"{BOLD}{RED}Error: No custom layers found.{NC}")
-            print(f"  Run '{GREEN}yocto-layers --new <name>{NC}' to create a layer first.")
+            UI.print_error("No custom layers found.")
+            print(f"  Run 'yocto-layers --new <name>' to create a layer first.")
             sys.exit(1)
         
         if len(all_layers) == 1:
             # Single layer - auto-select
             layer_name = all_layers[0].name.replace('meta-', '')
-            print(f"  Auto-detected layer: {BOLD}meta-{layer_name}{NC}")
+            UI.print_item("Auto-detected layer", f"meta-{layer_name}")
         elif cached_layer:
             # Use cached layer
             layer_name = cached_layer.replace('meta-', '')
-            print(f"  Using last-used layer: {BOLD}meta-{layer_name}{NC}")
+            UI.print_item("Using last-used layer", f"meta-{layer_name}")
         else:
             # Multiple layers, use first one
             layer_name = all_layers[0].name.replace('meta-', '')
-            print(f"  Using layer: {BOLD}meta-{layer_name}{NC}")
+            UI.print_item("Using layer", f"meta-{layer_name}")
 
-    print(f"  Project Name : {BOLD}{project_name}{NC}")
-    print(f"  Target Layer : {BOLD}meta-{layer_name if not layer_name.startswith('meta-') else layer_name}{NC}")
-    print(f"  Type         : {BOLD}{args.type}{NC}")
+    UI.print_item("Project Name", project_name)
+    UI.print_item("Target Layer", f"meta-{layer_name if not layer_name.startswith('meta-') else layer_name}")
+    UI.print_item("Type", args.type)
     
     sw_dir.mkdir(parents=True)
 
@@ -336,7 +327,7 @@ if __name__ == "__main__":
 """)
 
 
-    print(f"  Status       : Created files in {sw_dir}")
+    UI.print_item("Status", f"Created files in {sw_dir}")
 
     # Call add_package.py
     add_pkg_script = workspace_root / "scripts" / "add_package.py"
@@ -346,12 +337,12 @@ if __name__ == "__main__":
         if args.library:
             cmd.append("--library")
         subprocess.run(cmd, check=True)
-        print(f"\n{GREEN}Success! Project '{project_name}' is scaffolded and added to Yocto.{NC}")
+        UI.print_success(f"Project '{project_name}' setup complete.")
     except subprocess.CalledProcessError:
         # add_package.py prints its own errors
         sys.exit(1)
-    
-    print(f"{BOLD}{CYAN}=================================================={NC}")
 
 if __name__ == "__main__":
     main()
+
+

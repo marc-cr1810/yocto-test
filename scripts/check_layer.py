@@ -4,6 +4,10 @@ import sys
 import subprocess
 from pathlib import Path
 
+# Add scripts directory to path to import yocto_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from yocto_utils import UI, find_custom_layer
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Check sanity of Yocto layers")
@@ -14,36 +18,25 @@ def main():
     if args.layer:
          layer_dir = Path(args.layer).resolve()
     else:
-         sys.path.insert(0, str(Path(__file__).resolve().parent))
-         from yocto_utils import find_custom_layer
-         layer_dir = find_custom_layer(workspace_root)
+         try:
+             layer_dir = find_custom_layer(workspace_root)
+         except RuntimeError as e:
+             UI.print_error(str(e), fatal=True)
     
-    # ANSI Colors
-    BOLD = '\033[1m'
-    CYAN = '\033[0;36m'
-    GREEN = '\033[0;32m'
-    RED = '\033[0;31m'
-    NC = '\033[0m'
+    def pass_label(text): return f"{UI.GREEN}[ PASS ]{UI.NC} {text}"
+    def fail_label(text): return f"{UI.RED}[ FAIL ]{UI.NC} {text}"
 
-    def pass_label(text): return f"{GREEN}[ PASS ]{NC} {text}"
-    def fail_label(text): return f"{RED}[ FAIL ]{NC} {text}"
-
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    print(f"{BOLD}{CYAN}   Layer Sanity & Recipe Check{NC}")
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-    
-    print(f"  Layer        : {BOLD}{layer_dir.name}{NC}")
+    UI.print_header("Layer Sanity & Recipe Check")
+    UI.print_item("Layer", layer_dir.name)
     
     errors = 0
     # ... (rest of the checks, update labels below)
 
     if errors == 0:
-        print(f"\n{GREEN}{BOLD}Overall Status: HEALTHY{NC}")
+        print(f"\n{UI.GREEN}{UI.BOLD}Overall Status: HEALTHY{UI.NC}")
     else:
-        print(f"\n{RED}{BOLD}Overall Status: {errors} ISSUE(S) FOUND{NC}")
+        print(f"\n{UI.RED}{UI.BOLD}Overall Status: {errors} ISSUE(S) FOUND{UI.NC}")
         sys.exit(1)
     
-    print(f"{BOLD}{CYAN}=================================================={NC}")
-
 if __name__ == "__main__":
     main()
