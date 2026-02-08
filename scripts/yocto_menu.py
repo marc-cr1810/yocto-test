@@ -90,7 +90,7 @@ class YoctoMenuApp:
             MenuItem("Select Default Image", self.action_select_image, "Select the default image for build/run"),
             MenuItem("Build Image", self.action_build_image, "Build an image recipe"),
             MenuItem("Run in QEMU", self.action_run_qemu, "Run a built image in QEMU"),
-            MenuItem("Build SDK", f"python3 {SCRIPTS_DIR}/manage_sdk.py --build --interactive", "Build the SDK for cross-development"),
+            MenuItem("Build SDK", self.action_build_sdk, "Build the SDK for cross-development"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
 
@@ -554,6 +554,46 @@ class YoctoMenuApp:
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
+
+    def action_build_sdk(self):
+        """Build SDK for an image."""
+        # Reuse logic from build_image but different callback
+        recipes = []
+        try:
+             layers = yocto_utils.get_all_custom_layers(self.workspace_root)
+             for layer in layers:
+                  recipes.extend(yocto_utils.find_image_recipes(layer))
+        except: pass
+        
+        cached = yocto_utils.get_cached_image(self.workspace_root)
+        
+        items = []
+        if cached:
+             items.append(MenuItem(f"Build SDK for '{cached}'", lambda: self._perform_build_sdk(cached), "Build SDK for last used image"))
+             
+        seen = set()
+        if cached: seen.add(cached)
+        
+        for r in sorted(recipes):
+             if r not in seen:
+                 items.append(MenuItem(r, lambda x=r: self._perform_build_sdk(x), f"Build SDK for {r}"))
+                 seen.add(r)
+        
+        items.append(MenuItem("Enter manually...", self._build_sdk_manual, "Type image name"))
+        
+        menu = Menu("Select Image for SDK", items)
+        self.enter_menu(menu)
+        
+    def _perform_build_sdk(self, image):
+        # manage_sdk.py uses positional arg for image
+        cmd = f"python3 {SCRIPTS_DIR}/manage_sdk.py --build {image}"
+        self.run_shell_command(cmd)
+
+    def _build_sdk_manual(self):
+        name = self.get_input("Image Recipe Name:")
+        if name:
+             self._perform_build_sdk(name)
+
 
     def action_manage_fragments(self):
         """Submenu for fragment management."""
