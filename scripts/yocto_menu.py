@@ -53,6 +53,7 @@ class YoctoMenuApp:
         
         # Build & Run Submenu
         build_menu = Menu("Build & Run", [
+            MenuItem("Select Default Image", self.action_select_image, "Select the default image for build/run"),
             MenuItem("Build Image", f"python3 {SCRIPTS_DIR}/build_recipe.py", "Build the default or last used image"),
             MenuItem("Run in QEMU", f"python3 {SCRIPTS_DIR}/run_qemu.py --interactive", "Run an image in QEMU (interactive selection)"),
             MenuItem("Build SDK", f"python3 {SCRIPTS_DIR}/manage_sdk.py --build --interactive", "Build the SDK for cross-development"),
@@ -77,6 +78,7 @@ class YoctoMenuApp:
 
         # Configuration Submenu
         config_menu = Menu("Configuration", [
+            MenuItem("Select Machine", self.action_select_machine, "Switch target machine"),
             MenuItem("Machine Settings", f"python3 {SCRIPTS_DIR}/machine_manager.py", "Manage target machine configuration"),
             MenuItem("Optimize Workspace", f"python3 {SCRIPTS_DIR}/optimize_workspace.py", "Optimize local.conf for this host"),
             MenuItem("IDE Setup", f"python3 {SCRIPTS_DIR}/setup_ide.py", "Generate IDE configuration"),
@@ -260,10 +262,81 @@ class YoctoMenuApp:
                 input("Press Enter to return to menu...")
             else:
                 print("Cancelled.")
-                time.sleep(1)
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
+
+    def show_selection_menu(self, title: str, options: List[str], on_select: Callable[[str], None]):
+        """Generic selection menu."""
+        if not options:
+            return
+
+        # Create a temporary selection menu
+        items = [MenuItem(opt, lambda opt=opt: self._handle_selection(opt, on_select), "") for opt in options]
+        items.append(MenuItem("Cancel", self.go_back, "Cancel selection"))
+        
+        selection_menu = Menu(title, items)
+        self.enter_menu(selection_menu)
+
+    def _handle_selection(self, value: str, callback: Callable[[str], None]):
+        """Handle selection and return to previous menu."""
+        callback(value)
+        self.go_back()
+
+    def action_select_machine(self):
+        """Show machine selection menu."""
+        if not yocto_utils:
+            return
+            
+        machines_dict = yocto_utils.get_available_machines(self.workspace_root)
+        options = []
+        
+        # Add custom machines first
+        if machines_dict.get('custom'):
+            options.extend(machines_dict['custom'])
+            
+        # Add common Poky machines
+        if machines_dict.get('poky'):
+             # Limit to common ones to avoid clutter if list is huge
+            options.extend(machines_dict['poky'])
+            
+        self.show_selection_menu("Select Target Machine", options, self._set_machine)
+
+    def _set_machine(self, machine: str):
+        """Callback to set the machine."""
+        cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py {machine}"
+        self.run_shell_command(cmd)
+
+    def action_select_image(self):
+        """Show image selection menu."""
+        if not yocto_utils:
+            return
+            
+        # Get built images
+        images_list = yocto_utils.find_built_images(self.workspace_root)
+        if not images_list:
+            # Fallback to finding recipes if no images built
+            try:
+                layer = yocto_utils.find_custom_layer(self.workspace_root) # Get first custom layer
+                recipes = yocto_utils.find_image_recipes(layer)
+                options = recipes
+            except:
+                options = []
+        else:
+            options = sorted(list(set(img['name'] for img in images_list)))
+            
+        if not options:
+            self.run_shell_command("echo 'No built images or image recipes found.'")
+            return
+
+        self.show_selection_menu("Select Default Image", options, self._set_image)
+
+    def _set_image(self, image: str):
+        """Callback to set the cached image."""
+        yocto_utils.set_cached_image(self.workspace_root, image)
+        # Show a quick confirmation (simulated since we are in curses)
+        # Actually run_shell_command clears screen, so let's just use that to confirm
+        self.run_shell_command(f"echo 'Selected image: {image}'")
 
 if __name__ == "__main__":
     try:

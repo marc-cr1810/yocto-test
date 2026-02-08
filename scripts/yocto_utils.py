@@ -135,7 +135,37 @@ def find_custom_layer(workspace_root: Path, layer_name: Optional[str] = None) ->
     raise RuntimeError(
         f"Layer '{layer_name}' not found. Available custom layers: {', '.join(available)}"
     )
+    # Layer not found
+    available = [l.name for l in custom_layers]
+    raise RuntimeError(
+        f"Layer '{layer_name}' not found. Available custom layers: {', '.join(available)}"
+    )
 
+def get_available_machines(workspace_root: Path) -> dict:
+    """
+    Get all available machines from Poky and local layers.
+    Returns a dict with keys 'poky' and 'custom', each containing a list of machine names.
+    """
+    machines = {'poky': [], 'custom': []}
+    
+    # 1. Scan Poky
+    poky_dir = workspace_root / "bitbake-builds" / "poky-master"
+    meta_dir = poky_dir / "layers" / "openembedded-core" / "meta"
+    if meta_dir.exists():
+        for m in (meta_dir / "conf" / "machine").glob("*.conf"):
+            machines['poky'].append(m.stem)
+            
+    # 2. Scan Custom Layers
+    layers_dir = workspace_root / "yocto" / "layers"
+    if layers_dir.exists():
+        for m in layers_dir.rglob("conf/machine/*.conf"):
+            # Exclude anything that might be in a nested poky repo if it exists (sanity check)
+            if "openembedded-core" not in str(m):
+                machines['custom'].append(m.stem)
+                
+    machines['poky'].sort()
+    machines['custom'].sort()
+    return machines
 def get_machine_from_config(workspace_root: Path) -> Optional[str]:
     """
     Read the MACHINE variable from build/conf/local.conf.

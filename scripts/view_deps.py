@@ -20,7 +20,32 @@ def main():
     UI.print_item("Target", args.recipe)
     UI.print_item("Status", "Generating BitBake dependency data...")
     
-    # ... (logic remains same)
+    # Run bitbake -g to get dependency graph
+    cmd = f"bitbake -g {args.recipe}"
+    try:
+        subprocess.run(cmd, shell=True, check=True, cwd=workspace_root, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        UI.print_error(f"Failed to generate dependency graph: {e}")
+        sys.exit(1)
+
+    # Parse pn-buildlist to get the list of recipes in the build
+    buildlist_file = workspace_root / "pn-buildlist"
+    target = args.recipe
+    edges = []
+    
+    if os.path.exists("pn-depends.dot"):
+        with open("pn-depends.dot", "r") as f:
+            for line in f:
+                if "->" in line:
+                    parts = line.split("->")
+                    src = parts[0].strip().strip('"')
+                    dst = parts[1].strip().strip('"')
+                    edges.append((src, dst))
+    
+    # Clean up dot files
+    for f in ["pn-depends.dot", "package-depends.dot", "task-depends.dot"]:
+        if os.path.exists(f):
+            os.remove(f)
 
     if not edges:
         UI.print_warning("No non-trivial dependencies found.")

@@ -53,24 +53,13 @@ def show_current_machine(local_conf):
 def list_machines(workspace_root, poky_dir):
     UI.print_item("Status", "Scanning for available machines...")
     
-    # Standard Poky machines
-    poky_machines = []
-    meta_dir = poky_dir / "layers" / "openembedded-core" / "meta"
-    if meta_dir.exists():
-        for m in (meta_dir / "conf" / "machine").glob("*.conf"):
-            poky_machines.append(m.stem)
-            
-    # Local layer machines
-    local_machines = []
-    layer_dir = workspace_root / "yocto" / "layers"
-    if layer_dir.exists():
-        for m in layer_dir.rglob("conf/machine/*.conf"):
-            local_machines.append(m.stem)
+    from yocto_utils import get_available_machines
+    machines = get_available_machines(workspace_root)
 
-    if poky_machines:
-        UI.print_item("Poky/Core", ', '.join(sorted(poky_machines)))
-    if local_machines:
-        UI.print_item("Local Layer", f"{UI.GREEN}{', '.join(sorted(local_machines))}{UI.NC}")
+    if machines['poky']:
+        UI.print_item("Poky/Core", ', '.join(machines['poky']))
+    if machines['custom']:
+        UI.print_item("Local Layer", f"{UI.GREEN}{', '.join(machines['custom'])}{UI.NC}")
     
     print(f"\n  {UI.BOLD}Usage:{UI.NC} yocto-machine <name>")
 
