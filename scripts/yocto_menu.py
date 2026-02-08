@@ -16,9 +16,18 @@ sys.path.append(str(SCRIPTS_DIR))
 
 try:
     import yocto_utils
+    import config_manager
+    import update_image
+    from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
+    from yocto_utils import get_yocto_branch
 except ImportError:
     # Fallback if running standalone without yocto_utils nearby
     yocto_utils = None
+    config_manager = None
+    update_image = None
+    LayerIndex = None
+    DEFAULT_BRANCH = "master"
+    get_yocto_branch = lambda x: DEFAULT_BRANCH
 
 class MenuItem:
     def __init__(self, label: str, action: Callable or str, description: str = ""):
@@ -43,6 +52,13 @@ class YoctoMenuApp:
         # Build hierarchy
         self.main_menu = self._build_menus()
         self.current_menu = self.main_menu
+        
+        # State
+        self.current_branch = None
+        if yocto_utils:
+            self.current_branch = yocto_utils.get_yocto_branch(self.workspace_root)
+        if not self.current_branch:
+             self.current_branch = "master"
 
     def _find_workspace_root(self) -> Path:
         """Find the workspace root (parent of scripts dir)."""
@@ -78,7 +94,8 @@ class YoctoMenuApp:
 
         # Configuration Submenu
         config_menu = Menu("Configuration", [
-            MenuItem("Select Machine", self.action_select_machine, "Switch target machine"),
+            MenuItem("List Machines", self.action_list_machines, "List and switch target machines"),
+            MenuItem("Select Search Branch", self.action_select_branch, "Set Yocto release branch for searches"),
             MenuItem("Search Machine", self.action_search_machine, "Search for machines in Layer Index"),
             MenuItem("Get Machine", self.action_get_machine, "Fetch and install a machine's layer"),
             MenuItem("Manage Fragments", self.action_manage_fragments, "Enable/Disable configuration fragments"),
@@ -151,7 +168,8 @@ class YoctoMenuApp:
                 machine = yocto_utils.get_machine_from_config(self.workspace_root) or "Unknown"
                 layer = yocto_utils.get_cached_layer(self.workspace_root) or "None"
                 image = yocto_utils.get_cached_image(self.workspace_root) or "None"
-                status_text = f"Machine: {machine} | Layer: {layer} | Image: {image}"
+                branch = self.current_branch or "master"
+                status_text = f"Machine: {machine} | Branch: {branch} | Image: {image}"
                 if len(status_text) + 4 < width:
                     self.stdscr.addstr(1, width - len(status_text) - 2, status_text, curses.color_pair(4))
             except Exception:
@@ -177,9 +195,13 @@ class YoctoMenuApp:
         # Footer (Description)
         description = self.current_menu.items[self.current_menu.selected_idx].description
         if description:
-            self.stdscr.hline(height - 3, 2, curses.ACS_HLINE, width - 4)
-            self.stdscr.addstr(height - 2, 4, description, curses.color_pair(4))
+            self.stdscr.hline(height - 4, 2, curses.ACS_HLINE, width - 4)
+            self.stdscr.addstr(height - 3, 4, description, curses.color_pair(4))
 
+        # Keybinding Help
+        help_text = "Navigate: ↑↓ | Select: Enter | Back: q"
+        self.stdscr.addstr(height - 1, 2, help_text, curses.color_pair(1) | curses.A_DIM)
+        
         self.stdscr.refresh()
 
     def handle_input(self, key):
@@ -292,29 +314,56 @@ class YoctoMenuApp:
         callback(value)
         self.go_back()
 
-    def action_select_machine(self):
-        """Show machine selection menu."""
+    def action_list_machines(self):
+        """Native menu to list and switch machines."""
         if not yocto_utils:
             return
             
         machines_dict = yocto_utils.get_available_machines(self.workspace_root)
-        options = []
+        current = yocto_utils.get_machine_from_config(self.workspace_root)
         
-        # Add custom machines first
-        if machines_dict.get('custom'):
-            options.extend(machines_dict['custom'])
+        items = []
+        
+        # Helper to add items
+        def add_machine_item(name, category):
+            label = name
+            desc = f"Switch to {name} ({category})"
+            if name == current:
+                label = f"{name} *"
+                desc = f"Current machine ({category})"
             
-        # Add common Poky machines
-        if machines_dict.get('poky'):
-             # Limit to common ones to avoid clutter if list is huge
-            options.extend(machines_dict['poky'])
-            
-        self.show_selection_menu("Select Target Machine", options, self._set_machine)
+            items.append(MenuItem(label, lambda m=name: self._confirm_switch_machine(m), desc))
 
-    def _set_machine(self, machine: str):
-        """Callback to set the machine."""
-        cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py {machine}"
+        # Custom Machines
+        for m in machines_dict.get('custom', []):
+            add_machine_item(m, "Custom Layer")
+            
+        # Poky Machines
+        for m in machines_dict.get('poky', []):
+            add_machine_item(m, "Poky Standard")
+            
+        menu = Menu("Available Machines", items)
+        self.enter_menu(menu)
+
+    def _confirm_switch_machine(self, machine):
+        # We can switch immediately
+        # Using machine_manager to do the switch
+        cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py switch {machine}"
         self.run_shell_command(cmd)
+        # We might want to refresh the menu or header?
+        # Header refreshes automatically in draw_screen
+        self.go_back()
+
+
+    def action_select_branch(self):
+        """Select the active Yocto branch for searches."""
+        current = self.current_branch or "master"
+        new_branch = self.get_input(f"Enter Release Branch [current: {current}]:")
+        
+        if new_branch:
+             self.current_branch = new_branch
+             self.show_message(f"Search branch set to: {self.current_branch}")
+
 
     def action_select_image(self):
         """Show image selection menu."""
@@ -349,19 +398,47 @@ class YoctoMenuApp:
 
     def action_search_machine(self):
         """Search for a machine."""
-        curses.def_prog_mode()
-        curses.endwin()
+        term = self.get_input("Enter machine name to search:")
+        
+        if not term:
+            return
+
+        self.show_message(f"Searching for '{term}'...")
+        
         try:
-            term = input("Enter search term: ").strip()
-            if term:
-                # Use subcommand syntax
-                cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py search {term}"
-                self._run_command_impl(cmd)
-            else:
-                self._run_command_impl("echo 'Cancelled.'")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+            branch = self.current_branch
+            index = LayerIndex(branch=branch)
+            # This might take a second, message above helps
+            machines = index.search_machines(term)
+        except Exception as e:
+            self.show_message(f"Search failed: {e}")
+            return
+
+        if not machines:
+            self.show_message(f"No machines found for '{term}' in branch '{branch}'.")
+            return
+
+        items = []
+        for m in machines:
+             # We need layer info for context
+             info = index.get_machine_layer_info(m)
+             if info:
+                 label = f"{info['machine_name']} ({info['layer_name']})"
+                 desc = info.get('description', '')[:60]
+                 # Action: Fetch
+                 items.append(MenuItem(label, lambda m=m['name']: self._perform_get_machine(m), desc))
+
+        if not items:
+            self.show_message("Found matches but failed to resolve layer info.")
+            return
+
+        menu = Menu(f"Search Results: '{term}'", items)
+        self.enter_menu(menu)
+    
+    def _perform_get_machine(self, machine_name):
+        cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py get {machine_name}"
+        self.run_shell_command(cmd)
+        self.go_back()
 
     def action_get_machine(self):
         """Get (install) a machine."""
@@ -384,77 +461,104 @@ class YoctoMenuApp:
         options = [
             ("List Active Fragments", self.action_list_fragments),
             ("List Available Fragments", self.action_list_available_fragments),
-            ("Enable Fragment", self.action_enable_fragment),
-            ("Disable Fragment", self.action_disable_fragment)
+            ("Back", self.go_back)
         ]
         
-        while True:
-            # We construct a submenu loop here
-            # Ideally proper submenu implementation, but for now just show a selection
-            # Reuse show_selection_menu? logic or just loop
-            
-            # Simplified: Use a specific submenu method if I had one, 
-            # OR just list them.
-            
-            # Let's map it to indices
-            items = [opt[0] for opt in options]
-            
-            # Small hack: verify "Back" breaks loop
-            # We can use simple input loop or use existing menu structure logic?
-            # Existing logic is screen-based.
-            # Let's just create a dynamic menu handling here because architecture allows it.
-            
-            # But wait, self.show_selection_menu expects a callback.
-            # Let's use that.
-            
-            self.show_selection_menu("Fragment Management", items, self._handle_fragment_menu)
-            break # show_selection_menu is blocking-ish in its own loop but returns result to callback
+        items = [MenuItem(label, action) for label, action in options]
+        menu = Menu("Fragment Management", items)
+        self.enter_menu(menu)
 
-    def _handle_fragment_menu(self, selection):
-        if selection == "List Active Fragments":
-            self.action_list_fragments()
-        elif selection == "List Available Fragments":
-            self.action_list_available_fragments()
-        elif selection == "Enable Fragment":
-            self.action_enable_fragment()
-        elif selection == "Disable Fragment":
-            self.action_disable_fragment()
-        # Back does nothing, just return
+
 
     def action_list_fragments(self):
-        self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py list")
+        """Show active fragments in a submenu."""
+        fragments = config_manager.get_fragments()
+        if not fragments:
+            self.show_message("No active fragments.")
+            return
+
+        items = []
+        for f in fragments:
+            # Clicking an active fragment offers to disable it
+            items.append(MenuItem(f, lambda f=f: self._confirm_disable_fragment(f), "Select to disable"))
+        
+        menu = Menu("Active Fragments", items)
+        self.enter_menu(menu)
+    
+    def _confirm_disable_fragment(self, fragment):
+        # We can just disable it and refresh the menu, or ask confirmation.
+        # For speed, let's just disable and show message.
+        config_manager.disable_fragment(fragment)
+        self.show_message(f"Disabled {fragment}")
+        self.go_back() # Go back to manage fragments or refresh current? 
+        # Ideally we refresh. But our simple menu system doesn't auto-refresh.
+        # So going back to parenting menu is safest.
 
     def action_list_available_fragments(self):
-        self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py list-available")
-
-    def action_enable_fragment(self):
-        curses.def_prog_mode()
-        curses.endwin()
-        try:
-            val = input("Enter fragment to enable (e.g. machine/raspberrypi4): ").strip()
-            if val:
-                self._run_command_impl(f"python3 {SCRIPTS_DIR}/config_manager.py enable {val}")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
-
-    def action_disable_fragment(self):
-        # Could retrieve list first and make selection, for now simple input
-        # Or better: parse list and show selection?
-        # Let's try to be fancy: get list, show menu for disable
+        """Show available fragments in a submenu."""
+        available = config_manager.get_available_fragments()
+        active = config_manager.get_fragments()
         
-        # We need a way to get list programmatically. config_manager output parsing?
-        curses.def_prog_mode()
-        curses.endwin()
+        if not available:
+            self.show_message("No fragments found in layers (conf/fragments/*.conf).")
+            return
+
+        items = []
+        for name in sorted(available.keys()):
+            if name not in active:
+                items.append(MenuItem(name, lambda f=name: self._confirm_enable_fragment(f), "Select to Enable"))
+
+        menu = Menu("Available Fragments", items)
+        self.enter_menu(menu)
+
+    def _confirm_enable_fragment(self, fragment):
+        config_manager.enable_fragment(fragment)
+        self.show_message(f"Enabled {fragment}")
+        self.go_back()
+
+    def get_input(self, prompt: str) -> str:
+        """Get text input from the user via curses."""
+        h, w = self.stdscr.getmaxyx()
+        # Create a centered window
+        win_h, win_w = 4, min(60, w - 4)
+        win_y, win_x = (h - win_h) // 2, (w - win_w) // 2
+        
+        win = curses.newwin(win_h, win_w, win_y, win_x)
+        win.box()
+        win.addstr(1, 2, prompt[:win_w-4])
+        win.refresh()
+        
+        curses.echo()
+        curses.curs_set(1)
+        
+        input_str = ""
         try:
-             # Run list to show user
-             os.system(f"python3 {SCRIPTS_DIR}/config_manager.py list")
-             val = input("\nEnter fragment to disable (or Enter to cancel): ").strip()
-             if val:
-                 self._run_command_impl(f"python3 {SCRIPTS_DIR}/config_manager.py disable {val}")
+            # simple getstr
+            # enable echo for visibility
+            input_bytes = win.getstr(2, 2, win_w - 4)
+            input_str = input_bytes.decode('utf-8').strip()
+        except:
+             pass
         finally:
-             curses.reset_prog_mode()
-             self.stdscr.refresh()
+            curses.noecho()
+            curses.curs_set(0)
+            
+        return input_str
+
+    def show_message(self, msg, wait=True):
+        """Helper to show a message in curses without leaving."""
+        # Simple popup
+        h, w = self.stdscr.getmaxyx()
+        msg_win = curses.newwin(5, w-4, h//2-2, 2)
+        msg_win.box()
+        msg_win.addstr(2, 2, msg[:w-8])
+        if wait:
+            msg_win.addstr(3, 2, "Press any key...")
+        
+        msg_win.refresh()
+        
+        if wait:
+            msg_win.getch()
 
     # Image Package Management Actions
     def action_manage_packages(self):
@@ -463,71 +567,133 @@ class YoctoMenuApp:
             ("List Installed Packages", self.action_list_packages),
             ("Add Package", self.action_add_package),
             ("Remove Package", self.action_remove_package),
-            ("Refresh Workspace", self.refresh_image_wrapper)
+            ("Refresh Workspace", self.refresh_image_wrapper),
+            ("Back", self.go_back)
         ]
-        items = [opt[0] for opt in options]
-        self.show_selection_menu("Manage Image Packages", items, self._handle_pkg_menu)
+        items = [MenuItem(label, action) for label, action in options]
+        menu = Menu("Manage Image Packages", items)
+        self.enter_menu(menu)
 
-    def _handle_pkg_menu(self, selection):
-        if selection == "List Installed Packages":
-            self.action_list_packages()
-        elif selection == "Add Package":
-            self.action_add_package()
-        elif selection == "Remove Package":
-             self.action_remove_package()
-        elif selection == "Refresh Workspace":
-             self.refresh_image_wrapper()
 
     def refresh_image_wrapper(self):
          self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py refresh")
 
     def action_list_packages(self):
-        self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py list")
+        """Native menu for listing packages."""
+        try:
+            _, image_name, packages = update_image.get_current_image_info(self.workspace_root)
+        except Exception as e:
+            self.show_message(f"Error getting image info: {e}")
+            return
+
+        items = []
+        for pkg in packages:
+             items.append(MenuItem(pkg, lambda p=pkg: self._confirm_remove_package(p), "Select to Remove"))
+        
+        menu = Menu(f"Packages in {image_name}", items)
+        self.enter_menu(menu)
+    
+    def _confirm_remove_package(self, pkg):
+        # We'll use the proper remove command but implementing via shell wrapper for now 
+        # or we could call update_image directly?
+        # Direct call would be better but we need to pass args object.
+        # Let's keep using _run_command_impl for the actual modification to ensure user sees output
+        # But wait, avoiding shell is the goal? 
+        # Actually user wants "IN the menus". Output of the command is fine, but the *LIST* should be menu.
+        # Let's execute removal then showing message.
+        
+        # We need to call update_image logic.
+        # It's safer to use CLI wrapper for the ACTION phase to show potential errors/logs, 
+        # then return to menu (which refreshes).
+        
+        self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py remove {pkg}")
+        # After return, we are back in the list menu? No, run_shell_command refreshes screen but
+        # our Menu object might need reloading? 
+        # The Menu object's items are static. We need to refresh the list.
+        # So we should go back, then re-enter?
+        self.go_back()
+        self.action_list_packages() # Re-open updated list
 
     def action_add_package(self):
-        # Could show available list, but it might be huge.
-        # Let's prompt for search term first?
-        curses.def_prog_mode()
-        curses.endwin()
+        """Search and add package."""
+        term = self.get_input("Enter package name to search:")
+        
+        if not term:
+            return
+            
+        # Use search to find candidates
         try:
-            print("\n  Tip: You can search for packages or enter name directly.")
-            term = input("  Enter package name (or part of name to search): ").strip()
-            if term:
-                # Run available with filter
-                os.system(f"python3 {SCRIPTS_DIR}/update_image.py available {term}")
-                print("\n")
-                pkg = input("  Enter exact package name to ADD (or Enter to cancel): ").strip()
-                if pkg:
-                    self._run_command_impl(f"python3 {SCRIPTS_DIR}/update_image.py add {pkg}")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+            candidates = update_image.scan_all_recipes(self.workspace_root)
+            matches = [c for c in candidates if term in c]
+            
+            if not matches:
+                 self.show_message(f"No matches found for '{term}'")
+                 # Check if they want to force add? 
+                 # For now just return, simpler for native UI
+                 return
+        except Exception as e:
+            self.show_message(f"Error scanning packages: {e}")
+            return
+            
+        # Now show matches in a menu
+        if matches:
+            items = []
+            for m in matches:
+                items.append(MenuItem(m, lambda p=m: self._perform_add(p), "Select to Add"))
+            
+            menu = Menu(f"Add Package: '{term}'", items)
+            self.enter_menu(menu)
+            
+    def _perform_add(self, pkg):
+        self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py add {pkg}")
+        self.go_back() # Go back to search results? Or root?
+        # Go back to management menu
+        self.go_back()
 
     def action_remove_package(self):
-        curses.def_prog_mode()
-        curses.endwin()
-        try:
-            # Show list first
-            os.system(f"python3 {SCRIPTS_DIR}/update_image.py list")
-            print("\n")
-            pkg = input("  Enter package name to REMOVE (or Enter to cancel): ").strip()
-            if pkg:
-                self._run_command_impl(f"python3 {SCRIPTS_DIR}/update_image.py remove {pkg}")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+        # Alias to list, as listing allows removal
+        self.action_list_packages()
 
     def action_search_recipe(self):
         """Search for a recipe in the Layer Index."""
-        curses.def_prog_mode()
-        curses.endwin()
+        term = self.get_input("Enter recipe name to search:")
+
+        if not term:
+            return
+
+        self.show_message(f"Searching for '{term}'...")
+        
         try:
-            term = input("Enter recipe name to search: ").strip()
-            if term:
-                self._run_command_impl(f"{SCRIPTS_DIR}/yocto-search {term}")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+            branch = self.current_branch
+            index = LayerIndex(branch=branch)
+            recipes = index.search_recipes(term)
+        except Exception as e:
+            self.show_message(f"Search failed: {e}")
+            return
+            
+        if not recipes:
+            self.show_message(f"No recipes found for '{term}' in branch '{branch}'.")
+            return
+
+        items = []
+        # sort by similarity or just alphabetical?
+        # Exact match first
+        recipes.sort(key=lambda x: (x['pn'] != term, x['pn']))
+
+        for r in recipes[:30]: # Limit results
+             info = index.get_recipe_layer_info(r)
+             if info:
+                 label = f"{info['recipe_name']} ({info['layer_name']})"
+                 desc = info.get('summary', '')[:60]
+                 items.append(MenuItem(label, lambda r=r['pn']: self._perform_get_recipe(r), desc))
+
+        menu = Menu(f"Search Results: '{term}'", items)
+        self.enter_menu(menu)
+    
+    def _perform_get_recipe(self, recipe_name):
+        cmd = f"{SCRIPTS_DIR}/yocto-get {recipe_name}"
+        self.run_shell_command(cmd)
+        self.go_back()
 
     def action_get_recipe(self):
         """Get (install) a recipe."""
@@ -544,38 +710,35 @@ class YoctoMenuApp:
 
     def action_new_project(self):
         """Create a new project interactively."""
-        curses.def_prog_mode()
-        curses.endwin()
-        try:
-            print("\n  --- New Project Wizard ---\n")
-            name = input("  Project Name (e.g. my-app): ").strip()
-            if not name:
-                print("Cancelled.")
-                return
+        name = self.get_input("Project Name (e.g. my-app):")
+        if not name:
+            return
 
-            print("\n  Project Templates:")
-            print("  1. cmake   (C++ Application with CMake)")
-            print("  2. python  (Python Application)")
-            print("  3. script  (Shell Script)")
-            print("  4. module  (Kernel Module)")
+        # Template Selection
+        templates = [
+            ("cmake", "C++ Application with CMake"),
+            ("python", "Python Application"),
+            ("script", "Shell Script"),
+            ("recipe", "Yocto Recipe (standalone)")
+        ]
+        
+        # We need to capture the name in the closure
+        def pick_template(t_id):
+            # Default layer
+            layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
             
-            type_map = {'1': 'cmake', '2': 'python', '3': 'script', '4': 'module'}
-            t_choice = input("\n  Select Template [1-4] or Enter for 'cmake': ").strip()
-            p_type = type_map.get(t_choice, 'cmake')
+            # Run command
+            cmd = f"python3 {SCRIPTS_DIR}/new_project.py {name} --type {t_id} --layer {layer}"
+            self.run_shell_command(cmd)
+            # Return to previous menu
+            self.go_back()
+
+        items = []
+        for t_id, t_desc in templates:
+            items.append(MenuItem(t_desc, lambda t=t_id: pick_template(t), t_desc))
             
-            # Layer selection could be improved with list, but plain input is okay for now
-            # Actually we can use cached layer
-            default_layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
-            layer = input(f"  Target Layer [default: {default_layer}]: ").strip()
-            if not layer:
-                layer = default_layer
-                
-            cmd = f"python3 {SCRIPTS_DIR}/new_project.py {name} --type {p_type} --layer {layer}"
-            self._run_command_impl(cmd)
-            
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+        menu = Menu("Select Project Template", items)
+        self.enter_menu(menu)
 
     def action_add_project(self):
         """Add existing project interactively."""
@@ -615,6 +778,47 @@ class YoctoMenuApp:
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
+
+    def action_list_layers(self):
+        """Native menu to list and manage layers."""
+        layers = yocto_utils.get_bblayers(self.workspace_root)
+        
+        items = []
+        for layer in layers:
+            # Shorten path for display
+            display_name = layer.name
+            if str(layer).startswith(str(self.workspace_root)):
+                 display_path = str(layer.relative_to(self.workspace_root))
+            else:
+                 display_path = str(layer)
+                 
+            # Action: Show details (or remove?)
+            # For now, just show details or allowed actions
+            items.append(MenuItem(f"{display_name} ({display_path})", lambda l=layer: self._layer_details(l), "View layer details"))
+            
+        menu = Menu("Active Layers", items)
+        self.enter_menu(menu)
+
+    def _layer_details(self, layer_path):
+        # Submenu for a specific layer
+        items = [
+            MenuItem("Back", self.go_back, "Return to layer list")
+            # We could add "Remove Layer" here if we implement it safely
+        ]
+        
+        # Count recipes?
+        recipes = list(layer_path.glob("recipes-*/*/*.bb"))
+        
+        menu = Menu(f"Layer: {layer_path.name}", items)
+        # We can't easily show text in a Menu without items, so maybe just a message for now?
+        # Or a "Remove" action if it's a custom layer.
+        
+        is_custom = "yocto/layers" in str(layer_path)
+        if is_custom:
+             items.insert(0, MenuItem("Remove Layer", lambda: self.show_message("Removal not yet implemented (use bitbake-layers remove-layer)"), "Remove this layer from bblayers.conf"))
+        
+        self.show_message(f"Path: {layer_path}\nRecipes: {len(recipes)}")
+        # self.enter_menu(menu) # Not really useful yet unless we have actions
 
     def action_live_edit(self):
         """Live edit a recipe."""

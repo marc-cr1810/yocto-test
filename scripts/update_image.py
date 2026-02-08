@@ -76,6 +76,30 @@ def get_image_recipe_path(workspace_root, args):
 
     return image_recipe, image_name
 
+def get_current_image_info(workspace_root):
+    """
+    Helper to get current image info using simplified defaults (cached or auto-detect).
+    Returns (recipe_path, image_name, packages_list) or raises Exception.
+    """
+    # Create a dummy args object with defaults
+    class Args:
+        layer = None
+        image = None
+        no_cache = False
+        layer_no_cache = False
+        interactive = False
+        layer_interactive = False
+    
+    args = Args()
+    try:
+        recipe_path, image_name = get_image_recipe_path(workspace_root, args)
+        packages, _ = read_image_install(recipe_path)
+        return recipe_path, image_name, packages
+    except Exception as e:
+        # If detection fails, we propagate
+        raise e
+
+
 def read_image_install(recipe_path):
     """Read IMAGE_INSTALL from recipe."""
     if not recipe_path.exists():

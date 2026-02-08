@@ -118,7 +118,8 @@ def enable_fragment(fragment):
     if save_fragments(fragments):
         UI.print_success(f"Disabled '{fragment}'")
 
-def list_available_fragments():
+
+def get_available_fragments():
     """Scan layers for available configuration fragments."""
     # We need to find active layers to scan
     # Let's use yocto_utils.get_bblayers
@@ -127,7 +128,7 @@ def list_available_fragments():
         layers = get_bblayers(WORKSPACE_ROOT)
     except ImportError:
         UI.print_error("Could not import get_bblayers from yocto_utils")
-        return
+        return {}
 
     available = {} # dict of fragment_name -> path
 
@@ -136,19 +137,16 @@ def list_available_fragments():
             continue
             
         # Look for conf/fragments/*.conf
-        # This is a common convention, though not strictly standardized.
         fragment_dir = layer / "conf" / "fragments"
         if fragment_dir.exists():
             for conf in fragment_dir.rglob("*.conf"):
-                # Relative path from fragments dir is the name? 
-                # Or just filename? Let's use relative path to fragments dir.
-                # e.g. machine/rpi.conf -> machine/rpi
-                
                 rel_path = conf.relative_to(fragment_dir)
                 name = str(rel_path.with_suffix(''))
-                
                 available[name] = conf
+    return available
 
+def list_available_fragments():
+    available = get_available_fragments()
     active = get_fragments()
     
     UI.print_item("Available Fragments")
