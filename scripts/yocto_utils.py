@@ -174,6 +174,60 @@ def get_available_machines(workspace_root: Path) -> dict:
     machines['poky'].sort()
     machines['custom'].sort()
     return machines
+
+def get_bblayers(workspace_root: Path) -> List[Path]:
+    """
+    Parse bblayers.conf to get a list of active layer paths.
+    """
+    bblayers_conf = workspace_root / "bitbake-builds" / "poky-master" / "build" / "conf" / "bblayers.conf"
+    layers = []
+    
+    if not bblayers_conf.exists():
+        return []
+        
+    try:
+        content = bblayers_conf.read_text()
+        # Extract paths between quotes or just listed
+        # Typical format: BBLAYERS ?= " \n /path/to/layer \n "
+        
+        # Simple regex to find paths - assumes absolute paths or handling by caller
+        # Look for lines that look like paths inside the variable definition
+        # Actually, let's just find strings that look like paths
+        
+        # Robust parsing: look for BBLAYERS variable
+        match = re.search(r'BBLAYERS\s*\??=\s*"(.*?)"', content, re.DOTALL)
+        if match:
+             raw_paths = match.group(1).split()
+             for p in raw_paths:
+                 if p.strip() and p != "\\":
+                     layers.append(Path(p.strip()))
+    except Exception:
+        pass
+        
+    return layers
+
+def scan_all_recipes(workspace_root: Path) -> List[str]:
+    """
+    Scan all active layers for available recipes (.bb files).
+    Returns a sorted list of recipe names.
+    """
+    layers = get_bblayers(workspace_root)
+    recipes = set()
+    
+    for layer in layers:
+        if not layer.exists():
+            continue
+            
+        # Standard recipe directories
+        for recipe_file in layer.rglob("*.bb"):
+            # Exclude bbappends
+            if recipe_file.suffix == ".bb":
+                # Handle versioned recipes (e.g. bash_5.0.bb -> bash)
+                name = recipe_file.stem.split('_')[0]
+                recipes.add(name)
+                
+    return sorted(list(recipes))
+
 def get_machine_from_config(workspace_root: Path) -> Optional[str]:
     """
     Read the MACHINE variable from build/conf/local.conf.

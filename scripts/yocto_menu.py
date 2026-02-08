@@ -102,6 +102,7 @@ class YoctoMenuApp:
             MenuItem("Projects >", lambda: self.enter_menu(project_menu), "Create and manage projects"),
             MenuItem("Layers >", lambda: self.enter_menu(layer_menu), "Manage Yocto layers"),
             MenuItem("Configuration >", lambda: self.enter_menu(config_menu), "Machine and workspace settings"),
+            MenuItem("Manage Image Packages >", self.action_manage_packages, "Add/Remove packages from image"),
             MenuItem("Analysis >", lambda: self.enter_menu(analysis_menu), "Health checks and dependency analysis"),
             MenuItem("Make Clean", f"python3 {SCRIPTS_DIR}/safe_cleanup.py", "Clean build artifacts"),
             MenuItem("Exit", self.exit_app, "Exit the menu")
@@ -445,6 +446,68 @@ class YoctoMenuApp:
         finally:
              curses.reset_prog_mode()
              self.stdscr.refresh()
+
+    # Image Package Management Actions
+    def action_manage_packages(self):
+        """Submenu for image package management."""
+        options = [
+            ("List Installed Packages", self.action_list_packages),
+            ("Add Package", self.action_add_package),
+            ("Remove Package", self.action_remove_package),
+            ("Refresh Workspace", self.refresh_image_wrapper),
+            ("Back", None)
+        ]
+        items = [opt[0] for opt in options]
+        self.show_selection_menu("Manage Image Packages", items, self._handle_pkg_menu)
+
+    def _handle_pkg_menu(self, selection):
+        if selection == "List Installed Packages":
+            self.action_list_packages()
+        elif selection == "Add Package":
+            self.action_add_package()
+        elif selection == "Remove Package":
+             self.action_remove_package()
+        elif selection == "Refresh Workspace":
+             self.refresh_image_wrapper()
+
+    def refresh_image_wrapper(self):
+         self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py refresh")
+
+    def action_list_packages(self):
+        self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py list")
+
+    def action_add_package(self):
+        # Could show available list, but it might be huge.
+        # Let's prompt for search term first?
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            print("\n  Tip: You can search for packages or enter name directly.")
+            term = input("  Enter package name (or part of name to search): ").strip()
+            if term:
+                # Run available with filter
+                os.system(f"python3 {SCRIPTS_DIR}/update_image.py available {term}")
+                print("\n")
+                pkg = input("  Enter exact package name to ADD (or Enter to cancel): ").strip()
+                if pkg:
+                    self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py add {pkg}")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_remove_package(self):
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            # Show list first
+            os.system(f"python3 {SCRIPTS_DIR}/update_image.py list")
+            print("\n")
+            pkg = input("  Enter package name to REMOVE (or Enter to cancel): ").strip()
+            if pkg:
+                self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py remove {pkg}")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
 
 if __name__ == "__main__":
     try:

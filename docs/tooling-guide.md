@@ -64,14 +64,17 @@ yocto-add /path/to/my-project
 
 ### `yocto-image`
 Scans the workspace for all local projects and updates the image recipe to include them.
-- **Auto-detect**: `yocto-image` (auto-selects both layer and recipe)
-- **Explicit Recipe**: `yocto-image prod-image`
-- **Explicit Layer**: `yocto-image --layer meta-custom`
-- **Interactive Selection**: `yocto-image --interactive` (force menu for both)
-- **Layer Interactive**: `yocto-image --layer-interactive` (force layer menu only)
-- **Ignore Caches**: `yocto-image --no-cache` (ignore both caches)
+### `yocto-image`
+Refresh the image recipe or manage its packages.
+- **Refresh**: `yocto-image refresh` (or just `yocto-image`) - Updates image with workspace projects.
+- **List**: `yocto-image list` - Lists currently installed packages.
+- **Available**: `yocto-image available [filter]` - Lists all available recipes in active layers.
+- **Add**: `yocto-image add <package>` - Adds a package to the image (persists).
+- **Remove**: `yocto-image remove <package>` - Removes a package from the image.
+- **Options**:
+  - `--interactive`: Force interactive selection
+  - `--layer <name>`: Target specific layer
 
-> **Smart Features**: Auto-detects layer and recipe, shows interactive menus with recipe counts, remembers last-used layer and image.
 
 ### `yocto-build [name]`
 Builds a Yocto recipe or image. Auto-detects the most recent image when no target is specified.
