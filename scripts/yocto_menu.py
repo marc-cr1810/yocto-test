@@ -88,8 +88,8 @@ class YoctoMenuApp:
         # Build & Run Submenu
         build_menu = Menu("Build & Run", [
             MenuItem("Select Default Image", self.action_select_image, "Select the default image for build/run"),
-            MenuItem("Build Image", f"python3 {SCRIPTS_DIR}/build_recipe.py", "Build the default or last used image"),
-            MenuItem("Run in QEMU", f"python3 {SCRIPTS_DIR}/run_qemu.py --interactive", "Run an image in QEMU (interactive selection)"),
+            MenuItem("Build Image", self.action_build_image, "Build an image recipe"),
+            MenuItem("Run in QEMU", self.action_run_qemu, "Run a built image in QEMU"),
             MenuItem("Build SDK", f"python3 {SCRIPTS_DIR}/manage_sdk.py --build --interactive", "Build the SDK for cross-development"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
@@ -381,6 +381,85 @@ class YoctoMenuApp:
         if new_branch:
              self.current_branch = new_branch
              self.show_message(f"Search branch set to: {self.current_branch}")
+
+
+    def action_run_qemu(self):
+        """Run an image in QEMU."""
+        # Finds built images
+        images_list = yocto_utils.find_built_images(self.workspace_root)
+        if not images_list:
+             self.show_message("No built images found to run.")
+             return
+
+        # Explicitly deduplicate by name
+        seen = set()
+        unique_images = []
+        for img in images_list:
+            if img['name'] not in seen:
+                 seen.add(img['name'])
+                 unique_images.append(img)
+        
+        items = []
+        for img in unique_images:
+             # run_qemu.py takes image name
+             items.append(MenuItem(img['name'], lambda i=img['name']: self._perform_run_qemu(i), f"Run {i}"))
+             
+        menu = Menu("Select Image to Run", items)
+        self.enter_menu(menu)
+        
+    def _perform_run_qemu(self, image):
+        # We need to run this and NOT capture output (let it take over terminal completely)
+        # run_qemu.py is interactive typically
+        cmd = f"python3 {SCRIPTS_DIR}/run_qemu.py {image}"
+        self.run_shell_command(cmd)
+
+
+    def action_build_image(self):
+        """Build an image recipe."""
+        # 1. Try to find image recipes in custom layers
+        recipes = []
+        try:
+             # Scan all custom layers for image recipes
+             layers = yocto_utils.get_all_custom_layers(self.workspace_root)
+             for layer in layers:
+                  layer_recipes = yocto_utils.find_image_recipes(layer)
+                  recipes.extend(layer_recipes)
+        except Exception:
+             pass
+             
+        # Add basic images if list is empty or just as option?
+        # Let's add standard ones if we can't find any, or always?
+        # Keeping it simple: Custom images first.
+        
+        # Also allow building "current" image if set
+        cached = yocto_utils.get_cached_image(self.workspace_root)
+        
+        items = []
+        if cached:
+             items.append(MenuItem(f"Build '{cached}' (Last Used)", lambda: self._perform_build(cached), "Build the last used image"))
+             
+        seen = set()
+        if cached: seen.add(cached)
+        
+        for r in sorted(recipes):
+             if r not in seen:
+                 items.append(MenuItem(r, lambda x=r: self._perform_build(x), f"Build {r}"))
+                 seen.add(r)
+        
+        # Manual entry option
+        items.append(MenuItem("Enter manually...", self._build_manual, "Type recipe name"))
+        
+        menu = Menu("Select Image to Build", items)
+        self.enter_menu(menu)
+        
+    def _perform_build(self, image):
+        cmd = f"python3 {SCRIPTS_DIR}/build_recipe.py {image}"
+        self.run_shell_command(cmd)
+        
+    def _build_manual(self):
+        name = self.get_input("Image Recipe Name:")
+        if name:
+             self._perform_build(name)
 
 
     def action_select_image(self):
@@ -780,42 +859,39 @@ class YoctoMenuApp:
 
     def action_add_project(self):
         """Add existing project interactively."""
-        curses.def_prog_mode()
-        curses.endwin()
-        try:
-            print("\n  --- Add Existing Project ---\n")
-            name = input("  Project Name: ").strip()
-            if not name:
-                return
-                
-            url = input("  Source URL (git repo or local path): ").strip()
-            if not url:
-                return
-
-            # Ask for type
-            print("\n  Project Type:")
-            print("  1. cmake")
-            print("  2. python")
-            print("  3. makefile")
-            print("  4. module")
-            print("  5. autotools")
+        name = self.get_input("Project Name:")
+        if not name:
+            return
             
-            t_choice = input("\n  Select Type [1-5]: ").strip()
-            type_map = {'1': 'cmake', '2': 'python', '3': 'makefile', '4': 'module', '5': 'autotools'}
-            p_type = type_map.get(t_choice)
+        url = self.get_input("Source URL (git repo or local path):")
+        if not url:
+            return
+
+        # Project Type Selection
+        types = [
+            ("cmake", "CMake Project"),
+            ("python", "Python Project"),
+            ("makefile", "Makefile Project"),
+            ("module", "Kernel Module"),
+            ("autotools", "Autotools Project")
+        ]
+        
+        def pick_type(p_type):
+            # Default layer
+            layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
             
             type_arg = f"--type {p_type}" if p_type else ""
-            
-            default_layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
-            layer = input(f"  Target Layer [default: {default_layer}]: ").strip()
-            if not layer:
-                layer = default_layer
-                
             cmd = f"python3 {SCRIPTS_DIR}/add_package.py {name} --url {url} --layer {layer} {type_arg}"
-            self._run_command_impl(cmd)
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+            
+            self.run_shell_command(cmd)
+            self.go_back()
+
+        items = []
+        for t_id, t_desc in types:
+            items.append(MenuItem(t_desc, lambda t=t_id: pick_type(t), t_desc))
+            
+        menu = Menu("Select Project Type", items)
+        self.enter_menu(menu)
 
     def action_list_layers(self):
         """Native menu to list and manage layers."""
