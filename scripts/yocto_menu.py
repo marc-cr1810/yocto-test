@@ -567,13 +567,27 @@ class YoctoMenuApp:
 
     def show_message(self, msg, wait=True):
         """Helper to show a message in curses without leaving."""
-        # Simple popup
         h, w = self.stdscr.getmaxyx()
-        msg_win = curses.newwin(5, w-4, h//2-2, 2)
+        
+        # Calculate width based on message, max 80% screen, min 40 chars
+        win_w = max(40, min(w - 4, len(msg) + 6))
+        win_h = 5
+        
+        # Center the window
+        win_y = (h - win_h) // 2
+        win_x = (w - win_w) // 2
+        
+        msg_win = curses.newwin(win_h, win_w, win_y, win_x)
         msg_win.box()
-        msg_win.addstr(2, 2, msg[:w-8])
+        
+        # Center the text
+        text_x = max(1, (win_w - len(msg)) // 2)
+        msg_win.addstr(2, text_x, msg[:win_w-2])
+        
         if wait:
-            msg_win.addstr(3, 2, "Press any key...")
+            prompt = "Press any key..."
+            prompt_x = max(1, (win_w - len(prompt)) // 2)
+            msg_win.addstr(3, prompt_x, prompt)
         
         msg_win.refresh()
         
@@ -737,12 +751,13 @@ class YoctoMenuApp:
         if not name:
             return
 
-        # Template Selection
+        # Template Selection matching new_project.py choices
         templates = [
-            ("cmake", "C++ Application with CMake"),
+            ("cmake", "C++ Application (CMake)"),
             ("python", "Python Application"),
-            ("script", "Shell Script"),
-            ("recipe", "Yocto Recipe (standalone)")
+            ("module", "Kernel Module"),
+            ("rust",  "Rust Application"),
+            ("go",    "Go Application")
         ]
         
         # We need to capture the name in the closure
