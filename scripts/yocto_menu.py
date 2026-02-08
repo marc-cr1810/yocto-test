@@ -104,7 +104,7 @@ class YoctoMenuApp:
         
         # Layers Submenu
         layer_menu = Menu("Layer Management", [
-            MenuItem("New Layer", f"python3 {SCRIPTS_DIR}/layer_manager.py --new", "Create a new Yocto layer"),
+            MenuItem("New Layer", self.action_add_layer, "Create a new Yocto layer"),
             MenuItem("Sync Layers", f"python3 {SCRIPTS_DIR}/layer_manager.py", "Synchronize layer configurations"),
             MenuItem("Layer Info", f"python3 {SCRIPTS_DIR}/layer_manager.py --info --interactive", "View layer details and recipes"),
             MenuItem("Back", self.go_back, "Return to main menu")
@@ -541,19 +541,63 @@ class YoctoMenuApp:
 
     def action_get_machine(self):
         """Get (install) a machine."""
-        curses.def_prog_mode()
-        curses.endwin()
+        name = self.get_input("Enter machine name to install:")
+        if name:
+            cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py get {name}"
+            self.run_shell_command(cmd)
+
+    def action_get_recipe(self):
+        """Get (install) a recipe."""
+        self.show_message("Tip: You can search for recipes first with 'Search Recipe'", wait=False)
+        curses.doupdate()
+        time.sleep(1.5) # Short pause so they see the tip
+        
+        name = self.get_input("Enter recipe name to fetch (e.g. nginx):")
+        if name:
+             self.run_shell_command(f"{SCRIPTS_DIR}/yocto-get {name}")
+
+    def action_live_edit(self):
+        """Edit a workspace recipe."""
+        # Find recipes in workspace (meta-workspace/recipes-*)
         try:
-            name = input("Enter machine name to install: ").strip()
-            if name:
-                # Use subcommand syntax
-                cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py get {name}"
-                self._run_command_impl(cmd)
-            else:
-                self._run_command_impl("echo 'Cancelled.'")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+             # Borrow logic? Or use yocto_utils?
+             # yocto_utils.find_image_recipes gets images.
+             # We want all recipes in workspace layer.
+             layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
+             # We need to find the path
+             layer_path = yocto_utils.find_layer_path(self.workspace_root, layer)
+             if not layer_path:
+                  self.show_message(f"Could not find layer {layer}")
+                  return
+                  
+             # Simple glob for .bb files
+             import glob
+             recipes = []
+             for f in glob.glob(f"{layer_path}/recipes-*/*/*.bb"):
+                  recipes.append(os.path.basename(f))
+             
+             if not recipes:
+                  self.show_message("No recipes found in workspace.")
+                  return
+                  
+             items = []
+             for r in sorted(recipes):
+                  items.append(MenuItem(r, lambda x=r: self._perform_edit(layer_path, x), "Edit this recipe"))
+                  
+             menu = Menu("Select Recipe to Edit", items)
+             self.enter_menu(menu)
+        except Exception as e:
+             self.show_message(f"Error listing recipes: {e}")
+
+    def _perform_edit(self, layer_path, recipe_file):
+        # Find full path again
+        import glob
+        files = glob.glob(f"{layer_path}/recipes-*/*/{recipe_file}")
+        if files:
+             path = files[0]
+             editor = os.environ.get("EDITOR", "vim")
+             self.run_shell_command(f"{editor} {path}")
+
 
     def action_build_sdk(self):
         """Build SDK for an image."""
@@ -851,18 +895,7 @@ class YoctoMenuApp:
         self.run_shell_command(cmd)
         self.go_back()
 
-    def action_get_recipe(self):
-        """Get (install) a recipe."""
-        curses.def_prog_mode()
-        curses.endwin()
-        try:
-            print("\n  Tip: You can search for recipes first with 'Search Recipe'")
-            name = input("Enter recipe name to fetch (e.g. nginx): ").strip()
-            if name:
-                 self._run_command_impl(f"{SCRIPTS_DIR}/yocto-get {name}")
-        finally:
-            curses.reset_prog_mode()
-            self.stdscr.refresh()
+
 
     def action_new_project(self):
         """Create a new project interactively."""
@@ -950,8 +983,26 @@ class YoctoMenuApp:
             # For now, just show details or allowed actions
             items.append(MenuItem(f"{display_name} ({display_path})", lambda l=layer: self._layer_details(l), "View layer details"))
             
-        menu = Menu("Active Layers", items)
+        menu = Menu("List Layers", items)
         self.enter_menu(menu)
+
+    def action_add_layer(self):
+        """Wizard to add/create a layer."""
+        name = self.get_input("Layer Name (e.g. meta-myfeature):")
+        if not name: return
+        
+        # Optional: Priority
+        prio = self.get_input("Priority [default: 6]:")
+        if not prio: prio = "6"
+        
+        # We can use yocto-layers script
+        # yocto-layers --new creates it
+        cmd = f"python3 {SCRIPTS_DIR}/layer_manager.py --new {name} --priority {prio}"
+        self.run_shell_command(cmd)
+        self.go_back()
+        # Refresh parent list
+        self.go_back()
+        self.action_list_layers()
 
     def _layer_details(self, layer_path):
         # Submenu for a specific layer
