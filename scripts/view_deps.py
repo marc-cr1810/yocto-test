@@ -42,8 +42,8 @@ def main():
                     dst = parts[1].strip().strip('"')
                     edges.append((src, dst))
     
-    # Clean up dot files
-    for f in ["pn-depends.dot", "package-depends.dot", "task-depends.dot"]:
+    # Clean up dot files and buildlist
+    for f in ["pn-depends.dot", "package-depends.dot", "task-depends.dot", "pn-buildlist"]:
         if os.path.exists(f):
             os.remove(f)
 
