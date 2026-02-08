@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+import contextlib
 from pathlib import Path
 from typing import List, Tuple, Callable, Optional
 
@@ -59,6 +60,23 @@ class YoctoMenuApp:
             self.current_branch = yocto_utils.get_yocto_branch(self.workspace_root)
         if not self.current_branch:
              self.current_branch = "master"
+
+    @contextlib.contextmanager
+    def _suppress_output(self):
+        """Context manager to suppress stdout/stderr."""
+        if self.stdscr: # Only if in curses mode
+            with open(os.devnull, 'w') as devnull:
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
+                sys.stdout = devnull
+                sys.stderr = devnull
+                try:
+                    yield
+                finally:
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
+        else:
+            yield
 
     def _find_workspace_root(self) -> Path:
         """Find the workspace root (parent of scripts dir)."""
@@ -403,13 +421,15 @@ class YoctoMenuApp:
         if not term:
             return
 
-        self.show_message(f"Searching for '{term}'...")
+        self.show_message(f"Searching for '{term}'...", wait=False)
+        curses.doupdate()
         
         try:
             branch = self.current_branch
             index = LayerIndex(branch=branch)
             # This might take a second, message above helps
-            machines = index.search_machines(term)
+            with self._suppress_output():
+                machines = index.search_machines(term)
         except Exception as e:
             self.show_message(f"Search failed: {e}")
             return
@@ -661,12 +681,15 @@ class YoctoMenuApp:
         if not term:
             return
 
-        self.show_message(f"Searching for '{term}'...")
+        self.show_message(f"Searching for '{term}'...", wait=False)
+        curses.doupdate()
         
         try:
             branch = self.current_branch
             index = LayerIndex(branch=branch)
-            recipes = index.search_recipes(term)
+            with self._suppress_output():
+                recipes = index.search_recipes(term)
+            
         except Exception as e:
             self.show_message(f"Search failed: {e}")
             return
