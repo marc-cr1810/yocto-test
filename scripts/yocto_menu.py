@@ -62,9 +62,9 @@ class YoctoMenuApp:
 
         # Projects Submenu
         project_menu = Menu("Project Management", [
-            MenuItem("New Project", f"python3 {SCRIPTS_DIR}/new_project.py", "Create a new project"),
-            MenuItem("Add Existing Project", f"python3 {SCRIPTS_DIR}/add_package.py", "Add an existing project to the workspace"),
-            MenuItem("Live Edit Recipe", f"python3 {SCRIPTS_DIR}/live_edit.py", "Edit a recipe in the workspace"),
+            MenuItem("New Project", self.action_new_project, "Create a new project"),
+            MenuItem("Add Existing Project", self.action_add_project, "Add an existing project to the workspace"),
+            MenuItem("Live Edit Recipe", self.action_live_edit, "Edit a recipe in the workspace"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
         
@@ -92,6 +92,8 @@ class YoctoMenuApp:
         analysis_menu = Menu("Analysis & Health", [
             MenuItem("Workspace Health", f"python3 {SCRIPTS_DIR}/check_health.py", "Check workspace health status"),
             MenuItem("Check Layers", f"python3 {SCRIPTS_DIR}/check_layer.py", "Sanity check local layers"),
+            MenuItem("Search Recipe", self.action_search_recipe, "Search for recipes in Layer Index"),
+            MenuItem("Get Recipe", self.action_get_recipe, "Fetch and install a recipe"),
             MenuItem("Visualize Dependencies", self.prompt_dependency_viz, "Visualize project dependencies"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
@@ -215,7 +217,12 @@ class YoctoMenuApp:
         """Temporarily exit curses to run a shell command."""
         curses.def_prog_mode() # Save curses state
         curses.endwin()        # Restore terminal
-        
+        self._run_command_impl(cmd)
+        curses.reset_prog_mode() # Restore curses state
+        self.stdscr.refresh()
+
+    def _run_command_impl(self, cmd: str):
+        """Run command assuming we are already in shell mode."""
         print(f"\nRunning: {cmd}\n" + "-"*40)
         try:
             # Check if command needs input/args that we haven't provided
@@ -226,9 +233,6 @@ class YoctoMenuApp:
         
         print("\n" + "-"*40)
         input("Press Enter to return to menu...")
-        
-        curses.reset_prog_mode() # Restore curses state
-        self.stdscr.refresh()
 
     def enter_menu(self, menu: Menu):
         """Navitgate into a submenu."""
@@ -352,9 +356,9 @@ class YoctoMenuApp:
             if term:
                 # Use subcommand syntax
                 cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py search {term}"
-                self.run_shell_command(cmd)
+                self._run_command_impl(cmd)
             else:
-                self.run_shell_command("echo 'Cancelled.'")
+                self._run_command_impl("echo 'Cancelled.'")
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
@@ -368,9 +372,9 @@ class YoctoMenuApp:
             if name:
                 # Use subcommand syntax
                 cmd = f"python3 {SCRIPTS_DIR}/machine_manager.py get {name}"
-                self.run_shell_command(cmd)
+                self._run_command_impl(cmd)
             else:
-                self.run_shell_command("echo 'Cancelled.'")
+                self._run_command_impl("echo 'Cancelled.'")
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
@@ -379,9 +383,9 @@ class YoctoMenuApp:
         """Submenu for fragment management."""
         options = [
             ("List Active Fragments", self.action_list_fragments),
+            ("List Available Fragments", self.action_list_available_fragments),
             ("Enable Fragment", self.action_enable_fragment),
-            ("Disable Fragment", self.action_disable_fragment),
-            ("Back", None) # Back returns to previous menu
+            ("Disable Fragment", self.action_disable_fragment)
         ]
         
         while True:
@@ -409,14 +413,19 @@ class YoctoMenuApp:
     def _handle_fragment_menu(self, selection):
         if selection == "List Active Fragments":
             self.action_list_fragments()
+        elif selection == "List Available Fragments":
+            self.action_list_available_fragments()
         elif selection == "Enable Fragment":
             self.action_enable_fragment()
         elif selection == "Disable Fragment":
-             self.action_disable_fragment()
+            self.action_disable_fragment()
         # Back does nothing, just return
 
     def action_list_fragments(self):
         self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py list")
+
+    def action_list_available_fragments(self):
+        self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py list-available")
 
     def action_enable_fragment(self):
         curses.def_prog_mode()
@@ -424,7 +433,7 @@ class YoctoMenuApp:
         try:
             val = input("Enter fragment to enable (e.g. machine/raspberrypi4): ").strip()
             if val:
-                self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py enable {val}")
+                self._run_command_impl(f"python3 {SCRIPTS_DIR}/config_manager.py enable {val}")
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
@@ -442,7 +451,7 @@ class YoctoMenuApp:
              os.system(f"python3 {SCRIPTS_DIR}/config_manager.py list")
              val = input("\nEnter fragment to disable (or Enter to cancel): ").strip()
              if val:
-                 self.run_shell_command(f"python3 {SCRIPTS_DIR}/config_manager.py disable {val}")
+                 self._run_command_impl(f"python3 {SCRIPTS_DIR}/config_manager.py disable {val}")
         finally:
              curses.reset_prog_mode()
              self.stdscr.refresh()
@@ -454,8 +463,7 @@ class YoctoMenuApp:
             ("List Installed Packages", self.action_list_packages),
             ("Add Package", self.action_add_package),
             ("Remove Package", self.action_remove_package),
-            ("Refresh Workspace", self.refresh_image_wrapper),
-            ("Back", None)
+            ("Refresh Workspace", self.refresh_image_wrapper)
         ]
         items = [opt[0] for opt in options]
         self.show_selection_menu("Manage Image Packages", items, self._handle_pkg_menu)
@@ -490,7 +498,7 @@ class YoctoMenuApp:
                 print("\n")
                 pkg = input("  Enter exact package name to ADD (or Enter to cancel): ").strip()
                 if pkg:
-                    self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py add {pkg}")
+                    self._run_command_impl(f"python3 {SCRIPTS_DIR}/update_image.py add {pkg}")
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()
@@ -504,7 +512,121 @@ class YoctoMenuApp:
             print("\n")
             pkg = input("  Enter package name to REMOVE (or Enter to cancel): ").strip()
             if pkg:
-                self.run_shell_command(f"python3 {SCRIPTS_DIR}/update_image.py remove {pkg}")
+                self._run_command_impl(f"python3 {SCRIPTS_DIR}/update_image.py remove {pkg}")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_search_recipe(self):
+        """Search for a recipe in the Layer Index."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            term = input("Enter recipe name to search: ").strip()
+            if term:
+                self._run_command_impl(f"{SCRIPTS_DIR}/yocto-search {term}")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_get_recipe(self):
+        """Get (install) a recipe."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            print("\n  Tip: You can search for recipes first with 'Search Recipe'")
+            name = input("Enter recipe name to fetch (e.g. nginx): ").strip()
+            if name:
+                 self._run_command_impl(f"{SCRIPTS_DIR}/yocto-get {name}")
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_new_project(self):
+        """Create a new project interactively."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            print("\n  --- New Project Wizard ---\n")
+            name = input("  Project Name (e.g. my-app): ").strip()
+            if not name:
+                print("Cancelled.")
+                return
+
+            print("\n  Project Templates:")
+            print("  1. cmake   (C++ Application with CMake)")
+            print("  2. python  (Python Application)")
+            print("  3. script  (Shell Script)")
+            print("  4. module  (Kernel Module)")
+            
+            type_map = {'1': 'cmake', '2': 'python', '3': 'script', '4': 'module'}
+            t_choice = input("\n  Select Template [1-4] or Enter for 'cmake': ").strip()
+            p_type = type_map.get(t_choice, 'cmake')
+            
+            # Layer selection could be improved with list, but plain input is okay for now
+            # Actually we can use cached layer
+            default_layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
+            layer = input(f"  Target Layer [default: {default_layer}]: ").strip()
+            if not layer:
+                layer = default_layer
+                
+            cmd = f"python3 {SCRIPTS_DIR}/new_project.py {name} --type {p_type} --layer {layer}"
+            self._run_command_impl(cmd)
+            
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_add_project(self):
+        """Add existing project interactively."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            print("\n  --- Add Existing Project ---\n")
+            name = input("  Project Name: ").strip()
+            if not name:
+                return
+                
+            url = input("  Source URL (git repo or local path): ").strip()
+            if not url:
+                return
+
+            # Ask for type
+            print("\n  Project Type:")
+            print("  1. cmake")
+            print("  2. python")
+            print("  3. makefile")
+            print("  4. module")
+            print("  5. autotools")
+            
+            t_choice = input("\n  Select Type [1-5]: ").strip()
+            type_map = {'1': 'cmake', '2': 'python', '3': 'makefile', '4': 'module', '5': 'autotools'}
+            p_type = type_map.get(t_choice)
+            
+            type_arg = f"--type {p_type}" if p_type else ""
+            
+            default_layer = yocto_utils.get_cached_layer(self.workspace_root) or "meta-workspace"
+            layer = input(f"  Target Layer [default: {default_layer}]: ").strip()
+            if not layer:
+                layer = default_layer
+                
+            cmd = f"python3 {SCRIPTS_DIR}/add_package.py {name} --url {url} --layer {layer} {type_arg}"
+            self._run_command_impl(cmd)
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.refresh()
+
+    def action_live_edit(self):
+        """Live edit a recipe."""
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+             # Scan for available recipes to edit? Or just ask name
+             # Listing all recipes is slow.
+             print("\n  --- Live Edit Recipe (devtool modify) ---\n")
+             name = input("  Enter recipe name to edit: ").strip()
+             if name:
+                 self._run_command_impl(f"python3 {SCRIPTS_DIR}/live_edit.py {name}")
         finally:
             curses.reset_prog_mode()
             self.stdscr.refresh()

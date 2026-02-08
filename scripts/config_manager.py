@@ -28,6 +28,9 @@ def main():
     parser_disable = subparsers.add_parser("disable", help="Disable a fragment")
     parser_disable.add_argument("fragment", help="Fragment name (e.g. machine/qemuarm64)")
 
+    # List Available
+    parser_avail = subparsers.add_parser("list-available", help="List all available fragments in layers")
+
     args = parser.parse_args()
 
     UI.print_header("Yocto Fragment Manager")
@@ -41,6 +44,8 @@ def main():
         enable_fragment(args.fragment)
     elif args.command == "disable":
         disable_fragment(args.fragment)
+    elif args.command == "list-available":
+        list_available_fragments()
     else:
         list_fragments()
 
@@ -108,16 +113,57 @@ def enable_fragment(fragment):
     if save_fragments(fragments):
         UI.print_success(f"Enabled '{fragment}'")
 
-def disable_fragment(fragment):
-    fragments = get_fragments()
-    if fragment not in fragments:
-        UI.print_warning(f"Fragment '{fragment}' is not active.")
-        return
-
     UI.print_item("Disabling", fragment)
     fragments.remove(fragment)
     if save_fragments(fragments):
         UI.print_success(f"Disabled '{fragment}'")
+
+def list_available_fragments():
+    """Scan layers for available configuration fragments."""
+    # We need to find active layers to scan
+    # Let's use yocto_utils.get_bblayers
+    try:
+        from yocto_utils import get_bblayers
+        layers = get_bblayers(WORKSPACE_ROOT)
+    except ImportError:
+        UI.print_error("Could not import get_bblayers from yocto_utils")
+        return
+
+    available = {} # dict of fragment_name -> path
+
+    for layer in layers:
+        if not layer.exists():
+            continue
+            
+        # Look for conf/fragments/*.conf
+        # This is a common convention, though not strictly standardized.
+        fragment_dir = layer / "conf" / "fragments"
+        if fragment_dir.exists():
+            for conf in fragment_dir.rglob("*.conf"):
+                # Relative path from fragments dir is the name? 
+                # Or just filename? Let's use relative path to fragments dir.
+                # e.g. machine/rpi.conf -> machine/rpi
+                
+                rel_path = conf.relative_to(fragment_dir)
+                name = str(rel_path.with_suffix(''))
+                
+                available[name] = conf
+
+    active = get_fragments()
+    
+    UI.print_item("Available Fragments")
+    print("  " + "-" * 50)
+    
+    if not available:
+        print("  (None found in conf/fragments/)")
+    else:
+        # Group by folder (e.g. machine/, distro/, etc)
+        sorted_keys = sorted(available.keys())
+        for name in sorted_keys:
+            status = f"{UI.GREEN}[Active]{UI.NC}" if name in active else ""
+            print(f"  {name:<30} {status}")
+            
+    print("  " + "-" * 50)
 
 if __name__ == "__main__":
     main()
