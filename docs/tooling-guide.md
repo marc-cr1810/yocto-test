@@ -11,6 +11,11 @@ source scripts/env_init.sh
 
 ## Primary Tools
 
+### `yocto-menu` (or `makemenu`)
+A text-based menu interface for managing the entire workspace. Provides a centralized way to access all other tools.
+- **Usage**: `yocto-menu` or `makemenu`
+- **Navigation**: Arrow keys to move, Enter to select, Esc to go back.
+
 ### `yocto-new <name>`
 Scaffolds a new project from scratch in `sw/<name>` and automatically creates a corresponding Yocto recipe.
 

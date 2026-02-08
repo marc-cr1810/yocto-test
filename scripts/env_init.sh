@@ -61,7 +61,9 @@ yocto-live() { live_edit.py "$@"; }
 yocto-ide() { setup_ide.py "$@"; }
 yocto-sync() { sync_deps.py "$@"; }
 yocto-health() { check_health.py "$@"; }
-
+yocto-menu() { python3 "scripts/yocto_menu.py"; }
+# Alias for familiarity with kernel workflow
+alias makemenu="yocto-menu"
 # Define colors
 BOLD='\033[1m'
 CYAN='\033[0;36m'
@@ -70,6 +72,7 @@ NC='\033[0m' # No Color
 
 echo -e "\n${BOLD}${CYAN}# Yocto Automation Environment Initialized${NC}"
 echo -e "  Root: ${WORKSPACE_ROOT}"
+echo -e "  Menu: ${GREEN}yocto-menu${NC} (or ${GREEN}makemenu${NC}) : Interactive workspace manager"
 
 echo -e "\n  ${BOLD}Projects:${NC}"
 echo -e "    ${GREEN}yocto-new${NC} <name>    : Scaffold new project"
