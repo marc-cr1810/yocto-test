@@ -19,6 +19,7 @@ try:
     import yocto_utils
     import config_manager
     import update_image
+    import yocto_distro
     from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
     from yocto_utils import get_yocto_branch
 except ImportError:
@@ -26,6 +27,7 @@ except ImportError:
     yocto_utils = None
     config_manager = None
     update_image = None
+    yocto_distro = None
     LayerIndex = None
     DEFAULT_BRANCH = "master"
     get_yocto_branch = lambda x: DEFAULT_BRANCH
@@ -258,8 +260,8 @@ class YoctoMenuApp:
         # Configuration Submenu
         config_menu = Menu("Configuration", [
             MenuItem("List Machines", self.action_list_machines, "List and switch target machines"),
-            MenuItem("Manage Distro", f"python3 {SCRIPTS_DIR}/yocto_distro.py list", "List and switch Yocto distributions"),
-            MenuItem("Manage Fragments", f"python3 {SCRIPTS_DIR}/config_manager.py list-available", "Enable/Disable configuration fragments"),
+            MenuItem("Manage Distro", self.action_manage_distro, "List and switch Yocto distributions"),
+            MenuItem("Manage Fragments", self.action_manage_fragments, "Enable/Disable configuration fragments"),
             MenuItem("Select Search Branch", self.action_select_branch, "Set Yocto release branch for searches"),
             MenuItem("Search Machine", self.action_search_machine, "Search for machines in Layer Index"),
             MenuItem("Get Machine", self.action_get_machine, "Fetch and install a machine's layer"),
@@ -764,6 +766,104 @@ class YoctoMenuApp:
                 cmd += f" --remote {remote}"
                 
             self.run_shell_command(cmd)
+
+    def action_manage_distro(self):
+        """Manage Yocto distributions."""
+        try:
+            current = yocto_distro.get_current_distro(self.workspace_root)
+            available = yocto_distro.get_available_distros(self.workspace_root)
+            
+            if not available:
+                self.show_message("No distributions found in layers.")
+                return
+
+            items = []
+            # Sort with current first, then alphabetical
+            sorted_distros = sorted(available.keys())
+            
+            for d in sorted_distros:
+                label = d
+                desc = "Available Distribution"
+                if d == current:
+                    label = f"* {d}"
+                    desc = "Current Active Distribution"
+                
+                # Lambda captures d by value
+                items.append(MenuItem(label, lambda x=d: self._set_distro(x), desc))
+            
+            menu = Menu("Select Distribution", items)
+            self.enter_menu(menu)
+            
+        except Exception as e:
+            self.show_message(f"Error loading distros: {e}")
+
+    def _set_distro(self, distro_name):
+        """Set the active distro."""
+        if yocto_distro.set_distro(self.workspace_root, distro_name):
+            self.show_message(f"Distro set to: {distro_name}")
+            # Refresh menu to update star
+            self.go_back() 
+        else:
+            self.show_message(f"Failed to set distro: {distro_name}")
+
+    def action_manage_fragments(self):
+        """Manage configuration fragments."""
+        try:
+            available = config_manager.get_available_fragments()
+            active = config_manager.get_fragments()
+            
+            if not available:
+                self.show_message("No configuration fragments found.")
+                return
+
+            items = []
+            for name in sorted(available.keys()):
+                is_active = name in active
+                state = "[x]" if is_active else "[ ]"
+                label = f"{state} {name}"
+                desc = "Enabled" if is_active else "Disabled"
+                
+                # Lambda captures name
+                items.append(MenuItem(label, lambda x=name: self._toggle_fragment(x), desc))
+            
+            menu = Menu("Manage Configuration Fragments", items)
+            self.enter_menu(menu)
+            
+        except Exception as e:
+            self.show_message(f"Error loading fragments: {e}")
+
+    def _toggle_fragment(self, fragment_name):
+        """Toggle a config fragment."""
+        active = config_manager.get_fragments()
+        if fragment_name in active:
+            config_manager.disable_fragment(fragment_name)
+        else:
+            config_manager.enable_fragment(fragment_name)
+        
+        # Refresh current menu to show new state
+        # We need to rebuild the current menu items?
+        # Yes, standard refresh triggers redraw but items are static in Menu object unless rebuilt.
+        # So we re-call action_manage_fragments effectively?
+        # A simple hack is to pop and push again or rebuild items in place.
+        # But our navigation stack expects Menu objects.
+        # Let's just go back and re-enter? No that's jarring.
+        # Better: Rebuild items and update current_menu.items
+        
+        # Re-fetch state
+        active = config_manager.get_fragments()
+        items = []
+        available = config_manager.get_available_fragments()
+        for name in sorted(available.keys()):
+            is_active = name in active
+            state = "[x]" if is_active else "[ ]"
+            label = f"{state} {name}"
+            desc = "Enabled" if is_active else "Disabled"
+            items.append(MenuItem(label, lambda x=name: self._toggle_fragment(x), desc))
+            
+        self.current_menu.items = items
+        # Keep selection index valid
+        self.current_menu.selected_idx = min(self.current_menu.selected_idx, len(items) - 1)
+
 
     def action_query_variable(self):
         """Query a Yocto variable."""
