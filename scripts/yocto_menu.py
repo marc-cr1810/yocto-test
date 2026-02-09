@@ -258,10 +258,11 @@ class YoctoMenuApp:
         # Configuration Submenu
         config_menu = Menu("Configuration", [
             MenuItem("List Machines", self.action_list_machines, "List and switch target machines"),
+            MenuItem("Manage Distro", f"python3 {SCRIPTS_DIR}/yocto_distro.py list", "List and switch Yocto distributions"),
+            MenuItem("Manage Fragments", f"python3 {SCRIPTS_DIR}/config_manager.py list-available", "Enable/Disable configuration fragments"),
             MenuItem("Select Search Branch", self.action_select_branch, "Set Yocto release branch for searches"),
             MenuItem("Search Machine", self.action_search_machine, "Search for machines in Layer Index"),
             MenuItem("Get Machine", self.action_get_machine, "Fetch and install a machine's layer"),
-            MenuItem("Manage Fragments", self.action_manage_fragments, "Enable/Disable configuration fragments"),
             MenuItem("Machine Settings", f"python3 {SCRIPTS_DIR}/machine_manager.py", "Manage target machine configuration"),
             MenuItem("Optimize Workspace", f"python3 {SCRIPTS_DIR}/optimize_workspace.py", "Optimize local.conf for this host"),
             MenuItem("IDE Setup", f"python3 {SCRIPTS_DIR}/setup_ide.py", "Generate IDE configuration"),

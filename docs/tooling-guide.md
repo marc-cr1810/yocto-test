@@ -215,6 +215,7 @@ Enables `devtool modify` for a specific recipe, allowing for live editing and te
 
 - **`yocto-query <VAR>`**: Inspect the value of a Yocto variable (e.g., `WORKDIR`, `IMAGE_INSTALL`).
 - **`yocto-flash <image>`**: Safely burn a Yocto image to an SD card or USB drive.
+- **`yocto-distro {list|set|show}`**: Manage the Yocto Distribution (`DISTRO`).
 - **`yocto-deps <name>`**: Visualizes the dependency tree for a given project.
 - **`yocto-err`**: Displays the log of the last failed BitBake task.
 - **`yocto-clean`**: Performs a safe cleanup of build artifacts.
