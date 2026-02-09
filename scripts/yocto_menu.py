@@ -42,6 +42,148 @@ class Menu:
         self.items = items
         self.selected_idx = 0
 
+class MarkdownViewer:
+    """Simple Curses-based Markdown Viewer."""
+    def __init__(self, title: str, content: str):
+        self.title = title
+        self.content = content
+        self.lines = self._parse_content(content)
+        self.scroll_y = 0
+        self.running = True
+        self.stdscr = None
+        
+    def _parse_content(self, content: str) -> List[Tuple[str, int]]:
+        """Parse markdown into lines with color attributes."""
+        parsed = []
+        in_code_block = False
+        
+        for line in content.splitlines():
+            # Code Blocks
+            if line.strip().startswith("```"):
+                in_code_block = not in_code_block
+                parsed.append((line, curses.color_pair(3) | curses.A_DIM)) # Cyan-ish
+                continue
+            
+            if in_code_block:
+                parsed.append((line, curses.color_pair(3)))
+                continue
+
+            # Headers
+            if line.strip().startswith("#"):
+                level = len(line.split(' ')[0])
+                # Clean header
+                clean_line = line.strip().lstrip('#').strip()
+                # Center main title, left align others
+                if level == 1:
+                    parsed.append(("", 0)) # Spacing
+                    parsed.append((clean_line.upper(), curses.color_pair(2) | curses.A_BOLD))
+                    parsed.append(("", 0))
+                else:
+                    parsed.append((clean_line, curses.color_pair(2) | curses.A_BOLD))
+                continue
+            
+            # Lists
+            if line.strip().startswith("- ") or line.strip().startswith("* "):
+                parsed.append((line, 0))
+                continue
+            
+            # Quotes
+            if line.strip().startswith(">"):
+                parsed.append((line, curses.color_pair(4) | curses.A_ITALIC))
+                continue
+
+            # Default
+            parsed.append((line, 0))
+            
+        return parsed
+
+    def start(self):
+        curses.wrapper(self._main_loop)
+
+    def _main_loop(self, stdscr):
+        self.stdscr = stdscr
+        curses.curs_set(0)
+        
+        # Ensure colors are init (if running standalone)
+        # But we actully call this from main app which inits colors.
+        # Re-init just in case doesn't hurt or just relly on existing
+        
+        while self.running:
+            self._draw()
+            key = self.stdscr.getch()
+            self._handle_input(key)
+
+    def _draw(self):
+        self.stdscr.clear()
+        height, width = self.stdscr.getmaxyx()
+        
+        # Use safe width (width - 1) to avoid writing to the last column
+        # which can cause issues in some terminals or bottom-right corner
+        safe_width = width - 1
+        
+        # Header
+        self.stdscr.attron(curses.color_pair(3) | curses.A_REVERSE)
+        header = f" {self.title} "
+        try:
+            self.stdscr.addstr(0, 0, f"{header:<{safe_width}}")
+        except curses.error:
+            pass
+        self.stdscr.attroff(curses.color_pair(3) | curses.A_REVERSE)
+        
+        # Content Area
+        max_lines = height - 2 # Header + Footer
+        
+        for i in range(max_lines):
+            line_idx = self.scroll_y + i
+            if line_idx >= len(self.lines):
+                break
+                
+            text, attr = self.lines[line_idx]
+            # Truncate to width-2 (start at x=1, leave 1 space at right)
+            content_width = max(1, width - 2)
+            text = text[:content_width]
+            
+            if attr:
+                self.stdscr.attron(attr)
+            
+            try:
+                self.stdscr.addstr(i + 1, 1, text)
+            except curses.error:
+                pass # Ignore edge case errors
+                
+            if attr:
+                self.stdscr.attroff(attr)
+
+        # Footer
+        footer = " Scroll: \u2191\u2193/PgUp/PgDn | Exit: q "
+        # Ensure footer fits
+        footer = f"{footer:<{safe_width}}"[:safe_width]
+        try:
+            self.stdscr.addstr(height - 1, 0, footer, curses.color_pair(1) | curses.A_DIM)
+        except curses.error:
+            pass # Writing to bottom-right corner often returns ERR but succeeds
+        
+        self.stdscr.refresh()
+
+    def _handle_input(self, key):
+        height, _ = self.stdscr.getmaxyx()
+        page_size = height - 2
+        
+        if key == ord('q') or key == 27:
+            self.running = False
+        elif key == curses.KEY_UP:
+            self.scroll_y = max(0, self.scroll_y - 1)
+        elif key == curses.KEY_DOWN:
+            self.scroll_y = min(max(0, len(self.lines) - page_size), self.scroll_y + 1)
+        elif key == curses.KEY_NPAGE: # Page Down
+            self.scroll_y = min(max(0, len(self.lines) - page_size), self.scroll_y + page_size)
+        elif key == curses.KEY_PPAGE: # Page Up
+            self.scroll_y = max(0, self.scroll_y - page_size)
+        elif key == curses.KEY_HOME:
+            self.scroll_y = 0
+        elif key == curses.KEY_END:
+            self.scroll_y = max(0, len(self.lines) - page_size)
+
 class YoctoMenuApp:
     def __init__(self):
         self.workspace_root = self._find_workspace_root()
@@ -91,6 +233,7 @@ class YoctoMenuApp:
             MenuItem("Build Image", self.action_build_image, "Build an image recipe"),
             MenuItem("Run in QEMU", self.action_run_qemu, "Run a built image in QEMU"),
             MenuItem("Build SDK", self.action_build_sdk, "Build the SDK for cross-development"),
+            MenuItem("Deploy Recipe", self.action_deploy_recipe, "Deploy build artifacts to target"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
 
@@ -98,6 +241,7 @@ class YoctoMenuApp:
         project_menu = Menu("Project Management", [
             MenuItem("New Project", self.action_new_project, "Create a new project"),
             MenuItem("Add Existing Project", self.action_add_project, "Add an existing project to the workspace"),
+            MenuItem("Sync Project Deps", f"python3 {SCRIPTS_DIR}/sync_deps.py", "Sync CMake dependencies with Yocto recipes"),
             MenuItem("Live Edit Recipe", self.action_live_edit, "Edit a recipe in the workspace"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
@@ -126,6 +270,7 @@ class YoctoMenuApp:
         # Analysis Submenu
         analysis_menu = Menu("Analysis & Health", [
             MenuItem("Workspace Health", f"python3 {SCRIPTS_DIR}/check_health.py", "Check workspace health status"),
+            MenuItem("Show Last Error", f"python3 {SCRIPTS_DIR}/last_error.py", "Show log of last failed build task"),
             MenuItem("Check Layers", f"python3 {SCRIPTS_DIR}/check_layer.py", "Sanity check local layers"),
             MenuItem("Search Recipe", self.action_search_recipe, "Search for recipes in Layer Index"),
             MenuItem("Get Recipe", self.action_get_recipe, "Fetch and install a recipe"),
@@ -141,6 +286,7 @@ class YoctoMenuApp:
             MenuItem("Configuration >", lambda: self.enter_menu(config_menu), "Machine and workspace settings"),
             MenuItem("Manage Image Packages >", self.action_manage_packages, "Add/Remove packages from image"),
             MenuItem("Analysis >", lambda: self.enter_menu(analysis_menu), "Health checks and dependency analysis"),
+            MenuItem("Documentation", self.action_view_docs, "View tooling guide"),
             MenuItem("Make Clean", f"python3 {SCRIPTS_DIR}/safe_cleanup.py", "Clean build artifacts"),
             MenuItem("Exit", self.exit_app, "Exit the menu")
         ]
@@ -597,6 +743,56 @@ class YoctoMenuApp:
              path = files[0]
              editor = os.environ.get("EDITOR", "vim")
              self.run_shell_command(f"{editor} {path}")
+
+
+    def action_deploy_recipe(self):
+        """Deploy a recipe to a target."""
+        # TODO: Auto-detect built recipes to offer a list?
+        # For now, just ask for recipe name.
+        name = self.get_input("Enter recipe name to deploy:")
+        if name:
+            # Check if we have remote target set?
+            # deploy_recipe.py handles args. 
+            # We can prompt for remote target IP optionally?
+            remote = self.get_input("Remote target (user@IP) [optional]:")
+            
+            cmd = f"python3 {SCRIPTS_DIR}/deploy_recipe.py {name}"
+            if remote:
+                cmd += f" --remote {remote}"
+                
+            self.run_shell_command(cmd)
+
+    def action_view_docs(self):
+        """View the documentation."""
+        doc_path = self.workspace_root / "docs" / "tooling-guide.md"
+        if not doc_path.exists():
+            self.show_message("Documentation not found.")
+            return
+
+        try:
+            content = doc_path.read_text()
+            
+            # Temporarily suspend main menu loop
+            # But wait, MarkdownViewer uses curses.wrapper which might re-init curses.
+            # We are ALREADY in a curses wrapper from YoctoMenuApp.
+            # So we should call viewer._main_loop(self.stdscr) directly?
+            # Or better, just make MarkdownViewer take the window and run its own loop
+            # without wrapper.
+            
+            # Let's adjust MarkdownViewer usage here to be safe within existing loop
+            viewer = MarkdownViewer("Tooling Guide", content)
+            
+            # We need to save current screen state?
+            # Actually, just running viewer's loop on the same stdscr is fine.
+            # It handles its own drawing.
+            # When it returns, we just redraw our own screen.
+            viewer._main_loop(self.stdscr)
+            
+            # Restore our screen
+            self.draw_screen()
+            
+        except Exception as e:
+            self.show_message(f"Error viewing docs: {e}")
 
 
     def action_build_sdk(self):
