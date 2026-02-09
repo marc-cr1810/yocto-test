@@ -382,7 +382,15 @@ def find_built_images(workspace_root: Path, machine: Optional[str] = None) -> Li
     images = {}
     
     # Look for image files with common extensions
-    for pattern in ["*-image-*.wic", "*-image-*.ext4", "*-image-*.tar.bz2"]:
+    # .wic: Standard Yocto image
+    # .rpi-sdimg: Legacy Raspberry Pi format
+    # .img: Generic raw image
+    # .iso: PC/Hybrid ISOs
+    patterns = ["*-image-*.wic", "*-image-*.wic.bz2", "*-image-*.wic.gz", 
+                "*-image-*.rpi-sdimg", "*-image-*.img", "*-image-*.iso",
+                "*-image-*.ext4", "*-image-*.tar.bz2"]
+    
+    for pattern in patterns:
         for image_file in deploy_dir.glob(pattern):
             # Extract image name from filename
             # e.g., "core-image-falcon-qemux86-64.wic" -> "core-image-falcon"
@@ -393,9 +401,12 @@ def find_built_images(workspace_root: Path, machine: Optional[str] = None) -> Li
                 name = name.split(f"-{machine}")[0]
             
             # Remove extension
-            for ext in ['.wic', '.ext4', '.tar.bz2', '.tar.gz']:
+            # Sort by length desc so .wic.bz2 is matched before .bz2 (if we were stripping suffix, but here we strip specific endings)
+            extensions = ['.wic', '.wic.bz2', '.wic.gz', '.rpi-sdimg', '.img', '.iso', '.ext4', '.tar.bz2', '.tar.gz']
+            for ext in extensions:
                 if name.endswith(ext):
                     name = name[:-len(ext)]
+                    break
             
             # Only keep if it looks like an image name (contains "-image-")
             if "-image-" not in name:

@@ -232,6 +232,7 @@ class YoctoMenuApp:
             MenuItem("Select Default Image", self.action_select_image, "Select the default image for build/run"),
             MenuItem("Build Image", self.action_build_image, "Build an image recipe"),
             MenuItem("Run in QEMU", self.action_run_qemu, "Run a built image in QEMU"),
+            MenuItem("Flash to SD Card", f"python3 {SCRIPTS_DIR}/yocto_flash.py", "Safely write image to SD card/USB"),
             MenuItem("Build SDK", self.action_build_sdk, "Build the SDK for cross-development"),
             MenuItem("Deploy Recipe", self.action_deploy_recipe, "Deploy build artifacts to target"),
             MenuItem("Back", self.go_back, "Return to main menu")
@@ -275,6 +276,7 @@ class YoctoMenuApp:
             MenuItem("Search Recipe", self.action_search_recipe, "Search for recipes in Layer Index"),
             MenuItem("Get Recipe", self.action_get_recipe, "Fetch and install a recipe"),
             MenuItem("Visualize Dependencies", self.prompt_dependency_viz, "Visualize project dependencies"),
+            MenuItem("Inspect Variable", self.action_query_variable, "Query BitBake variable value"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
 
@@ -760,6 +762,17 @@ class YoctoMenuApp:
             if remote:
                 cmd += f" --remote {remote}"
                 
+            self.run_shell_command(cmd)
+
+    def action_query_variable(self):
+        """Query a Yocto variable."""
+        var = self.get_input("Variable Name (e.g. WORKDIR):")
+        if var:
+            # Optional recipe context
+            recipe = self.get_input("Recipe Context [optional]:")
+            cmd = f"python3 {SCRIPTS_DIR}/yocto_query.py {var}"
+            if recipe:
+                cmd += f" {recipe}"
             self.run_shell_command(cmd)
 
     def action_view_docs(self):

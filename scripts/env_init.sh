@@ -69,6 +69,8 @@ yocto-config() { config_manager.py "$@"; }
 yocto-get() { yocto_get.py "$@"; }
 yocto-search() { yocto_search.py "$@"; }
 yocto-menu() { yocto_menu.py "$@"; }
+yocto-query() { yocto_query.py "$@"; }
+yocto-flash() { yocto_flash.py "$@"; }
 
 # Alias for familiarity with kernel workflow
 alias makemenu="yocto-menu"
@@ -94,6 +96,7 @@ echo -e "    ${GREEN}yocto-build${NC} [name]  : Build recipe or image"
 echo -e "    ${GREEN}yocto-deploy${NC} <name> : Build and deploy to target"
 echo -e "    ${GREEN}yocto-run${NC}           : Build and boot in QEMU"
 echo -e "    ${GREEN}yocto-sdk${NC}           : Manage toolchain SDKs"
+echo -e "    ${GREEN}yocto-flash${NC}         : Burn image to SD card"
 echo -e "    ${GREEN}yocto-live${NC} <name>   : Enable devtool edit mode"
 
 echo -e "  ${BOLD}Analysis:${NC}"
@@ -101,6 +104,7 @@ echo -e "    ${GREEN}yocto-err${NC}           : Show latest build error"
 echo -e "    ${GREEN}yocto-health${NC}        : Workspace health dashboard"
 echo -e "    ${GREEN}yocto-search${NC} <term> : Search for recipes"
 echo -e "    ${GREEN}yocto-get${NC} <name>    : Fetch and install recipe"
+echo -e "    ${GREEN}yocto-query${NC} <VAR>   : Inspect Yocto variable"
 
 echo -e "  ${BOLD}System:${NC}"
 echo -e "    ${GREEN}yocto-machine${NC}       : Manage target machines"
