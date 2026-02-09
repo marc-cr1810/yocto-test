@@ -2,6 +2,7 @@
 import argparse
 import sys
 from pathlib import Path
+from packaging.version import parse as parse_version
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
 try:
@@ -46,19 +47,20 @@ def main():
     
     count = 0
     for r in recipes:
-        # Optimization: only resolve top N
-        if count >= args.limit:
-            break
-            
         info = index.get_recipe_layer_info(r)
         if info:
             results.append(info)
-            count += 1
     
     if not results:
         UI.print_error(f"No recipes found for branch '{args.branch}' matching '{args.term}'.")
         print(f"  Note: {len(recipes)} recipes matched the name, but none were compatible with branch '{args.branch}'.")
         sys.exit(0)
+
+    # Sort by version (newest first)
+    results.sort(key=lambda x: parse_version(x['version']), reverse=True)
+    
+    # Apply limit after sorting
+    results = results[:args.limit]
 
     # Display results
     print(f"\n  {UI.BOLD}{'Recipe':<30} {'Version':<20} {'Layer':<25} {'Summary'}{UI.NC}")

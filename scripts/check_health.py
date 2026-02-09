@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI, find_custom_layer
+from yocto_utils import UI, find_custom_layer, get_all_custom_layers, find_built_images, get_bitbake_yocto_dir
 
 def format_size(size):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -31,9 +31,10 @@ def get_status_label(level):
     if level == "CRIT": return f"{UI.RED}[ CRIT ]{UI.NC}"
     return f"[ {level} ]"
 
-def main():
+def check_workspace():
     workspace_root = Path(__file__).resolve().parent.parent
-    build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    build_dir = bitbake_yocto_dir / "build"
     sstate_dir = workspace_root / "bitbake-builds" / "shared" / "sstate-cache"
     
     UI.print_header("Yocto Workspace Health Dashboard")
@@ -62,7 +63,7 @@ def main():
         
     # 3. Environment Status
     UI.print_item("Check", "Environment")
-    bitbake_path = workspace_root / "bitbake-builds" / "poky-master" / "layers" / "bitbake"
+    bitbake_path = bitbake_yocto_dir / "layers" / "bitbake"
     bb_status = "OK" if bitbake_path.exists() else "CRIT"
     print(f"  {get_status_label(bb_status)} BitBake Tools")
     
@@ -72,35 +73,40 @@ def main():
     # 4. Layer Sanity
     UI.print_item("Check", "Layer Sanity")
     try:
-        custom_layer = find_custom_layer(workspace_root)
-        conf = custom_layer / "conf" / "layer.conf"
-        status = "OK" if conf.exists() else "CRIT"
-        print(f"  {get_status_label(status)} {custom_layer.name} layer")
-    except RuntimeError as e:
-        print(f"  {get_status_label('CRIT')} No custom layer found")
+        custom_layers = get_all_custom_layers(workspace_root)
+        if not custom_layers:
+             print(f"  {get_status_label('CRIT')} No custom layers found")
+        else:
+            custom_layer = custom_layers[0]
+            conf = custom_layer / "conf" / "layer.conf"
+            status = "OK" if conf.exists() else "CRIT"
+            print(f"  {get_status_label(status)} {custom_layer.name} layer")
+            
+            # 5. Local Projects
+            UI.print_item("Check", "Local Projects")
+            sw_dir = workspace_root / "sw"
+            if sw_dir.exists():
+                projects = []
+                for d in sw_dir.iterdir():
+                  if d.is_dir():
+                    for p in d.iterdir():
+                      if p.is_dir():
+                        projects.append(p)
+                
+                print(f"  Total Projects: {len(projects)}")
+                for p_path in projects:
+                    p = p_path.name
+                    recipe_exists = any((custom_layer).rglob(f"{p}_*.bb"))
+                    status = "OK" if recipe_exists else "WARN"
+                    label = "REGISTERED" if recipe_exists else "UNREGISTERED"
+                    print(f"    {get_status_label(status)} {p:15} ({label})")
+            else:
+                print(f"  {get_status_label('CRIT')} sw/ directory not found")
+    except Exception as e:
+        print(f"  {get_status_label('CRIT')} Error checking layers: {e}")
 
-    # 5. Local Projects
-    UI.print_item("Check", "Local Projects")
-    sw_dir = workspace_root / "sw"
-    if sw_dir.exists():
-        projects = []
-        for d in sw_dir.iterdir():
-          if d.is_dir():
-            for p in d.iterdir():
-              if p.is_dir():
-                projects.append(p)
-        
-        print(f"  Total Projects: {len(projects)}")
-        for p_path in projects:
-            p = p_path.name
-            recipe_exists = any((custom_layer).rglob(f"{p}_*.bb"))
-            status = "OK" if recipe_exists else "WARN"
-            label = "REGISTERED" if recipe_exists else "UNREGISTERED"
-            print(f"    {get_status_label(status)} {p:15} ({label})")
-    else:
-        print(f"  {get_status_label('CRIT')} sw/ directory not found")
-        
+def main():
+    check_workspace()
+
 if __name__ == "__main__":
     main()
-
-

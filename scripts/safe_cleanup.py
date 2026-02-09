@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI
+from yocto_utils import UI, get_bitbake_yocto_dir
 
 def get_dir_size(path):
     total = 0
@@ -31,7 +31,7 @@ def main():
     parser.parse_args()
 
     workspace_root = Path(__file__).resolve().parent.parent
-    build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
+    build_dir = get_bitbake_yocto_dir(workspace_root) / "build"
     
     UI.print_header("Safe Yocto Build Cleanup")
 

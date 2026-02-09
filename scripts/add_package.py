@@ -8,7 +8,19 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI, get_all_custom_layers, get_cached_layer, get_cached_image, find_custom_layer, find_image_recipes, add_package_to_image, set_cached_image
+from yocto_utils import (
+    UI,
+    run_command,
+    get_bitbake_yocto_dir,
+    find_custom_layer,
+    get_all_custom_layers,
+    set_cached_layer,
+    get_cached_layer,
+    get_cached_image,
+    find_image_recipes,
+    add_package_to_image,
+    set_cached_image
+)
 
 # Special case mappings (only for packages that don't follow the lowercase convention)
 CMAKE_TO_YOCTO_MAP = {
@@ -269,13 +281,22 @@ def main():
     if lic_file.exists():
         license_text = 'LICENSE = "MIT"\nLIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"'
         
+    pn_override = ""
+    if "_" in project_name:
+        # Detect if BitBake might misinterpret the name (e.g. some_project_1.0 -> PN=some, PV=project_1.0)
+        # We force PN to be the project name to matching directory name
+        # We also MUST set PV to avoid recursion errors (PV -> BP -> PN -> PV)
+        pn_override = f'PN = "{project_name}"\nPV = "{args.pv}"'
+        
     depends_str = ""
     if detected_deps:
         depends_str = f'DEPENDS = "{" ".join(detected_deps)}"'
 
     # Recipe Content
-    recipe_content = f"""SUMMARY = "{project_name} application"
+    if project_type in ["cpp", "cmake", "autotools"]:
+        recipe_content = f"""SUMMARY = "{project_name} application"
 {license_text}
+{pn_override}
 
 {inherit_class}
 
@@ -287,9 +308,10 @@ EXTERNALSRC_BUILD = "${{WORKDIR}}/build"
 {depends_str}
 """
     
-    if project_type == "module":
+    elif project_type == "module":
         recipe_content = f"""SUMMARY = "{project_name} kernel module"
 {license_text}
+{pn_override}
 
 {inherit_class}
 
@@ -321,6 +343,7 @@ do_configure:prepend() {{
     elif project_type == "rust":
         recipe_content = f"""SUMMARY = "{project_name} Rust application"
 {license_text}
+{pn_override}
 
 {inherit_class}
 
@@ -336,6 +359,7 @@ EXTERNALSRC_BUILD = "${{WORKDIR}}/build"
         go_import = go_module_path if go_module_path else project_name
         recipe_content = f"""SUMMARY = "{project_name} Go application"
 {license_text}
+{pn_override}
 
 {inherit_class}
 
@@ -376,6 +400,7 @@ do_compile[network] = "1"
     elif project_type == "python":
         recipe_content = f"""SUMMARY = "{project_name} Python application"
 {license_text}
+{pn_override}
 
 {inherit_class}
 
@@ -404,6 +429,9 @@ EXTERNALSRC = "${{THISDIR}}/{rel_project_path}"
         if not image_name:
             image_name = get_cached_image(workspace_root)
         
+        # Build env info
+        bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+        build_dir = bitbake_yocto_dir / "build"
         if not image_name:
             # Try to find custom images
             layer_path = find_custom_layer(workspace_root)

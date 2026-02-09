@@ -36,7 +36,6 @@ def detect_dependencies(project_dir, workspace_root, layer_dir=None):
                         deps.add(yocto_dep)
                 else:
                     # Check if it's an internal dependency (another project in sw/)
-                    # Search across all language directories
                     sw_dir = workspace_root / "sw"
                     found = False
                     for lang_dir in ["cpp", "rust", "go", "python", "module"]:
@@ -55,7 +54,6 @@ def detect_dependencies(project_dir, workspace_root, layer_dir=None):
                         
                         if not found:
                             # Default: convert to lowercase (most packages follow this convention)
-                            # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
                             deps.add(m.lower())
     return sorted(list(filter(None, deps)))
 

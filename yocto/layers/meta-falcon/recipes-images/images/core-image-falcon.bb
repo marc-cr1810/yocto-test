@@ -1,17 +1,16 @@
-SUMMARY = "Custom minimal image core-image-falcon"
+SUMMARY = "A custom image: core-image-falcon"
 LICENSE = "MIT"
 
 inherit core-image
 
-# Minimal image configuration (like core-image-minimal)
-IMAGE_INSTALL = "    packagegroup-core-boot \
+IMAGE_INSTALL = "    ${CORE_IMAGE_EXTRA_INSTALL} \
+    axi_dma \
+    legs_main \
+    packagegroup-core-boot \
+    tailscale \
     vim \
-    example \
-    test \
 "
 
-# Add SSH server
-IMAGE_FEATURES += "ssh-server-dropbear"
+IMAGE_LINGUAS = " "
 
-# Keep image minimal
-IMAGE_LINGUAS = ""
+

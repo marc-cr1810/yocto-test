@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI
+from yocto_utils import UI, find_custom_layer, get_all_custom_layers, get_bitbake_yocto_dir
 
 def find_file(base_dir, pattern):
     for path in base_dir.rglob(pattern):
@@ -20,14 +20,13 @@ def main():
     parser.parse_args()
 
     workspace_root = Path(__file__).resolve().parent.parent
-    build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
+    build_dir = get_bitbake_yocto_dir(workspace_root) / "build"
     
     UI.print_header("Setting up IDE & Toolchain Sync")
     
     UI.print_item("Status", "Searching for Yocto toolchain...")
     
     # 1. Find the cross-compiler
-    # We look for something like 'aarch64-poky-linux-gcc'
     compiler_path = None
     compiler_dir = build_dir / "tmp" / "sysroots-components" / "x86_64"
     if compiler_dir.exists():
@@ -44,11 +43,9 @@ def main():
     UI.print_success(f"Found compiler: {compiler_path.name}")
 
     # 2. Find the target sysroot
-    # We look for things like 'recipe-sysroot' in a target directory
     sysroot_path = None
     target_work_dir = build_dir / "tmp" / "work" / "qemuarm64-poky-linux"
     if target_work_dir.exists():
-        # Just pick the first recipe-sysroot we find as a baseline
         for path in target_work_dir.rglob("recipe-sysroot"):
             if path.is_dir():
                 sysroot_path = path
@@ -56,7 +53,6 @@ def main():
 
     if not sysroot_path:
         UI.print_warning("Could not find a representative target sysroot.")
-        # We can still proceed with just the compiler
     else:
         UI.print_success(f"Found sysroot: {sysroot_path.name}")
 
@@ -83,7 +79,6 @@ def main():
 
     if sysroot_path:
         kit["toolchainFile"] = "" # Use compiler flags instead of toolchain file for simplicity
-        # Add --sysroot to compiler flags
         kit["cmakeSettings"] = {
             "CMAKE_SYSROOT": to_ws_relative(sysroot_path)
         }

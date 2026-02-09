@@ -6,15 +6,10 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI
+from yocto_utils import UI, get_bitbake_yocto_dir
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Optimize Yocto local.conf settings")
-    parser.parse_args()
-
-    workspace_root = Path(__file__).resolve().parent.parent
-    local_conf = workspace_root / "bitbake-builds" / "poky-master" / "build" / "conf" / "local.conf"
+def optimize_local_conf(workspace_root: Path):
+    local_conf = get_bitbake_yocto_dir(workspace_root) / "build" / "conf" / "local.conf"
 
     UI.print_header("Optimizing Workspace Configuration")
 
@@ -24,9 +19,6 @@ def main():
     UI.print_item("Target", str(local_conf))
 
     # Shared directories (relative to build/ which is ${TOPDIR})
-    # build is at bitbake-builds/poky-master/build
-    # shared is at bitbake-builds/shared
-    # So relative path is ../../shared/downloads
     shared_dir = workspace_root / "bitbake-builds" / "shared"
     dl_dir = shared_dir / "downloads"
     sstate_dir = shared_dir / "sstate-cache"
@@ -81,4 +73,5 @@ def main():
         print(f"  {UI.BOLD}{key:20}{UI.NC} = {value}")
 
 if __name__ == "__main__":
-    main()
+    workspace_root = Path(__file__).resolve().parent.parent
+    optimize_local_conf(workspace_root)

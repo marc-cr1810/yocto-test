@@ -1,4 +1,4 @@
-obj-m += test.o
+obj-m += axi_dma.o
 
 SRC := $(shell pwd)
 

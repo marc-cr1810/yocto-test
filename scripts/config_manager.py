@@ -7,10 +7,10 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI, run_command
+from yocto_utils import UI, get_bitbake_yocto_dir
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
-BUILD_DIR = WORKSPACE_ROOT / "bitbake-builds" / "poky-master" / "build"
+BUILD_DIR = get_bitbake_yocto_dir(WORKSPACE_ROOT) / "build"
 TOOLCFG_PATH = BUILD_DIR / "conf" / "toolcfg.conf"
 
 def main():
@@ -113,6 +113,12 @@ def enable_fragment(fragment):
     if save_fragments(fragments):
         UI.print_success(f"Enabled '{fragment}'")
 
+def disable_fragment(fragment):
+    fragments = get_fragments()
+    if fragment not in fragments:
+        UI.print_warning(f"Fragment '{fragment}' is not enabled.")
+        return
+    
     UI.print_item("Disabling", fragment)
     fragments.remove(fragment)
     if save_fragments(fragments):
@@ -121,10 +127,8 @@ def enable_fragment(fragment):
 
 def get_available_fragments():
     """Scan layers for available configuration fragments."""
-    # We need to find active layers to scan
-    # Let's use yocto_utils.get_bblayers
     try:
-        from yocto_utils import get_bblayers
+        from yocto_utils import get_bblayers, get_layer_collection_name
         layers = get_bblayers(WORKSPACE_ROOT)
     except ImportError:
         UI.print_error("Could not import get_bblayers from yocto_utils")
@@ -136,12 +140,20 @@ def get_available_fragments():
         if not layer.exists():
             continue
             
+        # Get collection name for prefix (e.g. "core", "falcon")
+        # If not found, fall back to layer name (e.g. "meta-falcon")
+        collection = get_layer_collection_name(layer)
+        if not collection:
+            collection = layer.name
+            
         # Look for conf/fragments/*.conf
         fragment_dir = layer / "conf" / "fragments"
         if fragment_dir.exists():
             for conf in fragment_dir.rglob("*.conf"):
                 rel_path = conf.relative_to(fragment_dir)
-                name = str(rel_path.with_suffix(''))
+                # Fragment name is collection/path/to/fragment (without .conf)
+                # e.g. core/yocto/root-login-with-empty-password
+                name = f"{collection}/{str(rel_path.with_suffix(''))}"
                 available[name] = conf
     return available
 

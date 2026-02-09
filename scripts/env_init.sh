@@ -23,17 +23,21 @@ else
         return 1
     fi
 fi
-POKY_DIR="${WORKSPACE_ROOT}/bitbake-builds/poky-master"
-BUILD_DIR="${POKY_DIR}/build"
+# Find BitBake/Yocto distribution directory dynamically
+BITBAKE_YOCTO_DIR=$(find "${WORKSPACE_ROOT}/bitbake-builds" -maxdepth 1 \( -name "poky-*" -o -name "oe-*" \) -type d | head -n 1)
+if [ -z "$BITBAKE_YOCTO_DIR" ]; then
+    BITBAKE_YOCTO_DIR="${WORKSPACE_ROOT}/bitbake-builds/poky-master"
+fi
+BUILD_DIR="${BITBAKE_YOCTO_DIR}/build"
 
 # 1. Source the standard Yocto environment
-OE_INIT="${POKY_DIR}/layers/openembedded-core/oe-init-build-env"
+OE_INIT="${BITBAKE_YOCTO_DIR}/layers/openembedded-core/oe-init-build-env"
 ORIG_PWD=$(pwd)
 if [ -f "$OE_INIT" ]; then
     # We use the standard launcher
     source "$OE_INIT" "${BUILD_DIR}" > /dev/null
-elif [ -f "${POKY_DIR}/oe-init-build-env" ]; then
-    source "${POKY_DIR}/oe-init-build-env" "${BUILD_DIR}" > /dev/null
+elif [ -f "${BITBAKE_YOCTO_DIR}/oe-init-build-env" ]; then
+    source "${BITBAKE_YOCTO_DIR}/oe-init-build-env" "${BUILD_DIR}" > /dev/null
 else
     echo "Warning: Standard Yocto init script not found. Skipping auto-source."
 fi
@@ -62,7 +66,10 @@ yocto-ide() { setup_ide.py "$@"; }
 yocto-sync() { sync_deps.py "$@"; }
 yocto-health() { check_health.py "$@"; }
 yocto-config() { config_manager.py "$@"; }
-yocto-menu() { python3 "scripts/yocto_menu.py"; }
+yocto-get() { yocto_get.py "$@"; }
+yocto-search() { yocto_search.py "$@"; }
+yocto-menu() { yocto_menu.py "$@"; }
+
 # Alias for familiarity with kernel workflow
 alias makemenu="yocto-menu"
 # Define colors
@@ -73,6 +80,7 @@ NC='\033[0m' # No Color
 
 echo -e "\n${BOLD}${CYAN}# Yocto Automation Environment Initialized${NC}"
 echo -e "  Root: ${WORKSPACE_ROOT}"
+echo -e "  Dist: ${BITBAKE_YOCTO_DIR}"
 echo -e "  Menu: ${GREEN}yocto-menu${NC} (or ${GREEN}makemenu${NC}) : Interactive workspace manager"
 
 echo -e "\n  ${BOLD}Projects:${NC}"

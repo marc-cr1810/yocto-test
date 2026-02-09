@@ -69,6 +69,7 @@ Refresh the image recipe or manage its packages.
 - **Refresh**: `yocto-image refresh` (or just `yocto-image`) - Updates image with workspace projects.
 - **List**: `yocto-image list` - Lists currently installed packages.
 - **Available**: `yocto-image available [filter]` - Lists all available recipes in active layers.
+- **Create**: `yocto-image create [name]` - Creates a new image recipe (auto-detects layer).
 - **Add**: `yocto-image add <package>` - Adds a package to the image (persists).
 - **Remove**: `yocto-image remove <package>` - Removes a package from the image.
 - **Options**:
@@ -310,7 +311,7 @@ The workspace provides streamlined support for developing Linux kernel modules w
 yocto-new my-driver --type module --layer falcon
 
 # Add existing module from git
-yocto-add rtl8812au --url https://github.com/aircrack-ng/rtl8812au.git --type module
+yocto-add spdlog --url https://github.com/gabime/spdlog.git --type cmake --library
 ```
 
 ### Build Configuration

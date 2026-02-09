@@ -8,6 +8,24 @@ from typing import List, Optional
 import re
 import subprocess
 import sys
+import json
+
+def get_bitbake_yocto_dir(workspace_root: Path) -> Path:
+    """
+    Dynamically find the BitBake/Yocto distribution directory in bitbake-builds/.
+    Returns the path to the first poky-* or oe-* directory found.
+    Defaults to workspace_root / 'bitbake-builds' / 'poky-master' if not found.
+    """
+    try:
+        # Search for both poky-* and oe-*
+        build_roots = list((workspace_root / "bitbake-builds").glob("poky-*"))
+        build_roots.extend(list((workspace_root / "bitbake-builds").glob("oe-*")))
+        
+        if build_roots:
+            return build_roots[0]
+    except Exception:
+        pass
+    return workspace_root / "bitbake-builds" / "poky-master"
 
 class UI:
     """Centralized UI styling and output utilities."""
@@ -148,9 +166,9 @@ def get_available_machines(workspace_root: Path) -> dict:
     """
     machines = {'poky': [], 'custom': []}
     
-    # 1. Scan Poky
-    poky_dir = workspace_root / "bitbake-builds" / "poky-master"
-    meta_dir = poky_dir / "layers" / "openembedded-core" / "meta"
+    # 1. Scan Yocto Distribution
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    meta_dir = bitbake_yocto_dir / "layers" / "openembedded-core" / "meta"
     if meta_dir.exists():
         for m in (meta_dir / "conf" / "machine").glob("*.conf"):
             machines['poky'].append(m.stem)
@@ -179,7 +197,7 @@ def get_bblayers(workspace_root: Path) -> List[Path]:
     """
     Parse bblayers.conf to get a list of active layer paths.
     """
-    bblayers_conf = workspace_root / "bitbake-builds" / "poky-master" / "build" / "conf" / "bblayers.conf"
+    bblayers_conf = get_bitbake_yocto_dir(workspace_root) / "build" / "conf" / "bblayers.conf"
     layers = []
     
     if not bblayers_conf.exists():
@@ -208,9 +226,49 @@ def get_bblayers(workspace_root: Path) -> List[Path]:
 
 def scan_all_recipes(workspace_root: Path) -> List[str]:
     """
-    Scan all active layers for available recipes (.bb files).
+    Scan all active layers for available recipes using bitbake-layers.
     Returns a sorted list of recipe names.
     """
+    # Use bitbake-layers for authoritative source
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    rel_yocto = bitbake_yocto_dir.relative_to(workspace_root)
+    cmd = f"source {rel_yocto}/layers/openembedded-core/oe-init-build-env {rel_yocto}/build && bitbake-layers show-recipes"
+    
+    try:
+        # Check if we can run bitbake-layers (env might be tricky from python wrapper if not set)
+        # We rely on run_command but we need to source env first.
+        # Note: This might be slow (5-10s).
+        
+        # We use a shell command with verify=False to avoid crashing if it fails
+        # USE /bin/bash explicitly to support 'source'
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=workspace_root, executable="/bin/bash")
+        
+        if result.returncode != 0:
+            # Fallback to manual scan if bitbake fails (e.g. parsing error)
+            UI.print_warning("bitbake-layers failed, falling back to manual scan.")
+            return _scan_all_recipes_manual(workspace_root)
+            
+        output = result.stdout
+        recipes = set()
+        
+        for line in output.splitlines():
+            # Output format:
+            # recipe-name:
+            #   layer-name       version
+            if line.endswith(':'):
+                name = line[:-1].strip()
+                # Filter out garbage or non-recipe lines that might randomly end in :
+                if ' ' not in name and '/' not in name:
+                     recipes.add(name)
+                     
+        return sorted(list(recipes))
+        
+    except Exception as e:
+        UI.print_warning(f"Error scanning recipes: {e}")
+        return _scan_all_recipes_manual(workspace_root)
+
+def _scan_all_recipes_manual(workspace_root: Path) -> List[str]:
+    """Fallback manual scanner"""
     layers = get_bblayers(workspace_root)
     recipes = set()
     
@@ -218,13 +276,40 @@ def scan_all_recipes(workspace_root: Path) -> List[str]:
         if not layer.exists():
             continue
             
-        # Standard recipe directories
         for recipe_file in layer.rglob("*.bb"):
-            # Exclude bbappends
             if recipe_file.suffix == ".bb":
-                # Handle versioned recipes (e.g. bash_5.0.bb -> bash)
-                name = recipe_file.stem.split('_')[0]
-                recipes.add(name)
+                # Try to be smarter about PN
+                # If content has PN = "name", use it?
+                # This is expensive to read all files.
+                # Just blindly look for matching patterns
+                stem = recipe_file.stem
+                
+                # If filename has _v, assume it is version separator?
+                # BitBake default: first underscore.
+                # But we can try to guess if it matches standard patterns.
+                parts = stem.split('_')
+                if len(parts) > 1:
+                    name = parts[0]
+                    # ALSO add the full stem just in case? No.
+                    # Add strictly name.
+                    recipes.add(name)
+                    
+                    # ALSO add the name assuming the override exists?
+                    # Example: legs_main_1.0 -> legs_main
+                    # If we can't read the file, we can't know.
+                    # But we can add heuristics: if part[1] is NOT a number?
+                    # legs_main_1.0 -> main is not number.
+                    # So maybe 'legs_main' is the name?
+                    # logic: name ends at first part that starts with digit?
+                    
+                    candidate = parts[0]
+                    for i in range(1, len(parts)):
+                        if parts[i][0].isdigit():
+                            break
+                        candidate += "_" + parts[i]
+                    recipes.add(candidate)
+                else:
+                    recipes.add(stem)
                 
     return sorted(list(recipes))
 
@@ -234,7 +319,7 @@ def get_machine_from_config(workspace_root: Path) -> Optional[str]:
     
     Returns the machine name or None if not found.
     """
-    local_conf = workspace_root / "bitbake-builds" / "poky-master" / "build" / "conf" / "local.conf"
+    local_conf = get_bitbake_yocto_dir(workspace_root) / "build" / "conf" / "local.conf"
     
     if not local_conf.exists():
         return None
@@ -270,7 +355,7 @@ def find_built_images(workspace_root: Path, machine: Optional[str] = None) -> Li
     if machine is None:
         return []
     
-    deploy_dir = workspace_root / "bitbake-builds" / "poky-master" / "build" / "tmp" / "deploy" / "images" / machine
+    deploy_dir = get_bitbake_yocto_dir(workspace_root) / "build" / "tmp" / "deploy" / "images" / machine
     
     if not deploy_dir.exists():
         return []
@@ -521,6 +606,84 @@ def select_layer_interactive(workspace_root: Path, layers: List[Path], cached_la
         print(f"\n  Selection cancelled.")
         return None
 
+def read_image_install(recipe_path: Path):
+    """
+    Read the IMAGE_INSTALL variable from a recipe.
+    Returns (packages_list, original_content).
+    """
+    if not recipe_path.exists():
+        return [], ""
+    
+    with open(recipe_path, 'r') as f:
+        content = f.read()
+        
+    # Regex to find all IMAGE_INSTALL lines
+    # Matches: IMAGE_INSTALL = "...", IMAGE_INSTALL += "...", IMAGE_INSTALL:append = "..."
+    # Captures the value inside quotes
+    matches = re.findall(r'IMAGE_INSTALL(?:[:_\w]+)?\s*[+:]?=\s*"(.*?)"', content, re.DOTALL)
+    
+    packages = []
+    for raw in matches:
+        clean = raw.replace('\\', ' ').replace('\n', ' ')
+        for p in clean.split():
+            if p.strip():
+                packages.append(p.strip())
+        
+    return packages, content
+
+def update_image_install(recipe_path: Path, packages: List[str], original_content: str) -> bool:
+    """
+    Rewrite the IMAGE_INSTALL variable in a recipe with the new list of packages.
+    """
+    sorted_packages = sorted(list(set(packages))) # Dedup and sort
+    
+    # Format cleanly
+    install_lines = []
+    for p in sorted_packages:
+         install_lines.append(f"    {p}")
+    install_str = " \\\n".join(install_lines)
+    
+    # Construct new block
+    new_block = f'IMAGE_INSTALL = "{install_str} \\\n"'
+    
+    # regex to match valid IMAGE_INSTALL lines
+    pattern = r'IMAGE_INSTALL(?:[:_\w]+)?\s*[+:]?=\s*".*?"'
+    
+    # Check if we have any matches
+    if not re.search(pattern, original_content, re.DOTALL):
+        # Determine where to add
+        # Try to find inherit line
+        if "inherit core-image" in original_content:
+            new_content = original_content.replace("inherit core-image", f"inherit core-image\n\n{new_block}")
+        else:
+            new_content = original_content + f"\n\n{new_block}"
+    else:
+        # Find all spans
+        matches = list(re.finditer(pattern, original_content, re.DOTALL))
+        
+        # We will reconstruct the content piece by piece
+        new_content = ""
+        last_pos = 0
+        
+        for i, m in enumerate(matches):
+            # Append content before this match
+            new_content += original_content[last_pos:m.start()]
+            
+            # If it's the first match, insert the new block
+            if i == 0:
+                new_content += new_block
+                
+            # Update last_pos to end of this match (skipping the original line)
+            last_pos = m.end()
+            
+        # Append remaining content
+        new_content += original_content[last_pos:]
+    
+    with open(recipe_path, 'w') as f:
+        f.write(new_content)
+        
+    return True
+
 def add_package_to_image(workspace_root: Path, image_name: str, package_name: str) -> bool:
     """
     Add a package to an image recipe's IMAGE_INSTALL list.
@@ -545,46 +708,15 @@ def add_package_to_image(workspace_root: Path, image_name: str, package_name: st
         # but usually we only want to modify custom ones.
         return False
         
+    
     try:
-        with open(image_recipe, 'r') as f:
-            content = f.read()
-            
-        # Check if already present
-        if f'"{package_name}"' in content or f' {package_name} ' in content or f' {package_name}\\' in content:
+        packages, content = read_image_install(image_recipe)
+        
+        if package_name in packages:
             return True
             
-        # Look for IMAGE_INSTALL
-        match = re.search(r'IMAGE_INSTALL\s*[?+:]?=\s*"(.*?)"', content, re.DOTALL)
-        if match:
-            original_val = match.group(0)
-            inner_val = match.group(1).rstrip()
-            
-            # Decide how to append
-            if '\\' in inner_val:
-                # Multi-line format
-                new_inner = inner_val
-                if not new_inner.endswith('\\'):
-                    new_inner += ' \\'
-                new_inner += f'\n    {package_name} \\'
-            else:
-                # Single line
-                new_inner = f"{inner_val} {package_name}"
-                
-            new_val = f'IMAGE_INSTALL += "{package_name}"' # Using += is safer and cleaner for appending
-            
-            # Actually, let's just append a new line with IMAGE_INSTALL:append = " package" 
-            # or IMAGE_INSTALL += " package" at the end of the file or after the block.
-            # But editing the existing block is more "workspace-like"
-            
-            # Simple approach: if IMAGE_INSTALL exists, append to file
-            with open(image_recipe, 'a') as f:
-                f.write(f'\nIMAGE_INSTALL += "{package_name}"\n')
-            return True
-        else:
-            # No IMAGE_INSTALL found, let's just create a new += line
-            with open(image_recipe, 'a') as f:
-                f.write(f'\nIMAGE_INSTALL += "{package_name}"\n')
-            return True
+        packages.append(package_name)
+        return update_image_install(image_recipe, packages, content)
             
     except Exception as e:
         print(f"  Error updating image recipe: {e}")
@@ -592,38 +724,112 @@ def add_package_to_image(workspace_root: Path, image_name: str, package_name: st
 
 def get_yocto_branch(workspace_root: Path) -> str:
     """
-    Detect the Yocto branch/series from the environment.
+    detect the Yocto branch/series from the environment.
     Strategy:
-    1. Check for LAYERSERIES_COMPAT_core in meta/conf/layer.conf
-    2. Fallback to 'master'
+    1. Find bitbake-builds/poky-* or oe-* directory
+    2. Read config/sources-fixed-revisions.json
+    3. Extract sources.bitbake.git-remote.branch
+    4. Fallback to LAYERSERIES_COMPAT in layer.conf
+    5. Fallback to 'master'
     """
     try:
-        # Method 1: Check layers/openembedded-core/meta/conf/layer.conf
-        candidates = list(workspace_root.glob("bitbake-builds/*/layers/openembedded-core/meta/conf/layer.conf"))
-        if not candidates:
-             candidates = list(workspace_root.glob("bitbake-builds/*/layers/meta-yocto/meta-poky/conf/layer.conf"))
-             
-        if candidates:
-            layer_conf = candidates[0]
-            with open(layer_conf, 'r') as f:
-                for line in f:
-                    if "LAYERSERIES_COMPAT_core" in line or "LAYERSERIES_COMPAT_poky" in line:
-                        parts = line.split('=')
-                        if len(parts) > 1:
-                            val = parts[1].strip().strip('"')
-                            return val.split()[-1]
-                            
-        # Method 2: Check folder name logic 
-        build_roots = list((workspace_root / "bitbake-builds").glob("poky-*"))
-        if build_roots:
-            name = build_roots[0].name
-            if "-" in name:
-                return name.split("-", 1)[1]
+        bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+        
+        # 1. Preferred Method: Read from sources-fixed-revisions.json
+        # This reflects the actual git branch used.
+        branch = None
+        config_file = bitbake_yocto_dir / "config" / "sources-fixed-revisions.json"
+        
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                data = json.load(f)
+                branch = data.get('sources', {}).get('bitbake', {}).get('git-remote', {}).get('branch')
 
+        # 2. Hybrid Check: If branch is 'master' or not found, we need the actual Yocto series name
+        # for Layer Index compatibility (e.g. 'whinlatter').
+        if not branch or branch == "master":
+            candidates = [
+                bitbake_yocto_dir / "layers" / "openembedded-core" / "meta" / "conf" / "layer.conf",
+                bitbake_yocto_dir / "layers" / "meta-yocto" / "meta-poky" / "conf" / "layer.conf"
+            ]
+                 
+            for layer_conf in candidates:
+                if layer_conf.exists():
+                    with open(layer_conf, 'r') as f:
+                        for line in f:
+                            # Use LAYERSERIES_COMPAT_core as the authoritative series name
+                            if "LAYERSERIES_COMPAT_core" in line or "LAYERSERIES_COMPAT_poky" in line:
+                                parts = line.split('=')
+                                if len(parts) > 1:
+                                    val = parts[1].strip().strip('"')
+                                    # Take the last one if space-separated
+                                    # Handle cases like "nanbield scarthgap"
+                                    # We return the first one as the 'primary' series or just use the last
+                                    # Actually, returning the last one is common for compatibility checks
+                                    # but we'll return the first one as it's the more specific 'base' usually.
+                                    # Wait, whinlatter is what BitBake said.
+                                    return val.split()[-1]
+            
+            # If we found 'master' in JSON but no metadata override, use 'master'
+            if branch:
+                return branch
+                
     except Exception:
         pass
         
     return "master"
+
+def get_active_layers(workspace_root: Path) -> List[str]:
+    """
+    Get names of currently active layers.
+    """
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    build_dir = bitbake_yocto_dir / "build"
+    layers = []
+    
+    # 1. Try bitbake-layers (authoritative but fragile)
+    try:
+        # We need a shell that can source. oe-init-build-env is required.
+        rel_yocto = bitbake_yocto_dir.relative_to(workspace_root)
+        cmd = f"source {rel_yocto}/layers/openembedded-core/oe-init-build-env {rel_yocto}/build && bitbake-layers show-layers"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=workspace_root, executable="/bin/bash")
+        
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] != "layer":
+                     if parts[0] in ["NOTE:", "WARNING:", "ERROR:"]:
+                         continue
+                     layers.append(parts[0]) # name
+    except Exception:
+        pass
+    
+    # 2. Fallback to manual bblayers.conf parsing if empty
+    if not layers:
+        layer_paths = get_bblayers(workspace_root)
+        for lp in layer_paths:
+            layers.append(lp.name)
+            
+    return list(set(layers))
+
+def check_branch_compatibility(workspace_root: Path, requested_branch: str) -> bool:
+    """
+    Check if the requested branch is compatible with the workspace branch.
+    Returns True if compatible or if user chooses to proceed.
+    """
+    ws_branch = get_yocto_branch(workspace_root)
+    
+    if requested_branch == ws_branch:
+        return True
+        
+    UI.print_warning(f"Branch Mismatch: Workspace is '{ws_branch}', but requested '{requested_branch}'.")
+    UI.print_item("Potential Issue", "Using a different branch may lead to layer compatibility errors.")
+    
+    try:
+        choice = input(f"  Proceed anyway? [y/N]: ").strip().lower()
+        return choice == 'y'
+    except (EOFError, KeyboardInterrupt):
+        return False
 
 def prune_machine_fragments(workspace_root: Path):
     """
@@ -633,9 +839,11 @@ def prune_machine_fragments(workspace_root: Path):
     if not workspace_root:
         return
 
-    # Assuming standard layout
-    poky_dir = workspace_root / "bitbake-builds" / "poky-master"
-    toolcfg = poky_dir / "build" / "conf" / "toolcfg.conf"
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    # Use the collection name instead of directory name where possible
+    # to avoid hardcoding "meta-test" etc.
+    if config_mode:
+        toolcfg = bitbake_yocto_dir / "build" / "conf" / "toolcfg.conf"
     
     if not toolcfg.exists():
         return
@@ -666,3 +874,39 @@ def prune_machine_fragments(workspace_root: Path):
                 
     except Exception as e:
         print(f"  {UI.YELLOW}[WARN] Failed to prune fragments: {e}{UI.NC}")
+
+def get_layer_collection_name(layer_path: Path) -> Optional[str]:
+    """
+    Get the BBFILE_COLLECTIONS name for a layer from its conf/layer.conf.
+    
+    Args:
+        layer_path: Path to the layer root
+        
+    Returns:
+        The collection name (e.g. "core", "falcon") or None if not found/error.
+    """
+    layer_conf = layer_path / "conf" / "layer.conf"
+    if not layer_conf.exists():
+        return None
+        
+    try:
+        with open(layer_conf, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Look for BBFILE_COLLECTIONS += "name" or similar
+                if "BBFILE_COLLECTIONS" in line and ("+=" in line or "=" in line):
+                    # parse simple assignment or append
+                    parts = line.split("=")
+                    if len(parts) > 1:
+                        # Value might be quoted
+                        val = parts[1].strip().strip('"').strip("'")
+                        # If it's an append (+=), it might have leading space which strip handles
+                        # Often it's just one name, but could be multiple? Standard is one per layer.
+                        # We'll take the first non-empty part
+                        val_parts = val.split()
+                        if val_parts:
+                            return val_parts[0]
+    except Exception:
+        pass
+        
+    return None

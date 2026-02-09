@@ -11,8 +11,11 @@ from yocto_utils import (
     set_cached_layer,
     select_layer_interactive,
     get_all_custom_layers,
+    get_bblayers,
     run_command,
-    UI
+    UI,
+    get_bitbake_yocto_dir,
+    get_yocto_branch
 )
 
 def main():
@@ -31,10 +34,9 @@ def main():
     UI.print_header("Yocto Layer Management")
 
     if args.new:
-        scaffold_layer(args.new, layers_base)
-        return
+        scaffold_layer(args.new, layers_base, workspace_root)
+        # Fall through to sync_layers to register it immediately
 
-    # Handle --info command
     if args.info is not None:
         layer = get_layer_for_command(workspace_root, args.info, args.interactive, args.no_cache)
         if layer:
@@ -42,7 +44,6 @@ def main():
             set_cached_layer(workspace_root, layer.name)
         return
 
-    # Handle --recipes command
     if args.recipes is not None:
         layer = get_layer_for_command(workspace_root, args.recipes, args.interactive, args.no_cache)
         if layer:
@@ -50,11 +51,80 @@ def main():
             set_cached_layer(workspace_root, layer.name)
         return
 
+    health_check(layers_base)
+    prune_missing_layers(workspace_root)
+    sync_layers(workspace_root, layers_base)
+
+def health_check(layers_base: Path):
+    """
+    Performs basic health checks before proceeding with layer operations.
+    """
     if not layers_base.is_dir():
         UI.print_error(f"Layers directory not found: {layers_base}", fatal=True)
 
-    # Default: Management Logic (Syncing layers)
-    sync_layers(workspace_root, layers_base)
+def prune_missing_layers(workspace_root: Path):
+    """
+    Check for and remove missing layer directories from bblayers.conf.
+    """
+    layers = get_bblayers(workspace_root)
+    missing = []
+    
+    for layer in layers:
+        if not layer.exists():
+            missing.append(layer)
+            
+    if not missing:
+        return
+        
+    UI.print_warning(f"Found {len(missing)} missing layers in bblayers.conf:")
+    for m in missing:
+        print(f"    {m}")
+        
+    print(f"\n  {UI.BOLD}These layers prevent BitBake from starting.{UI.NC}")
+    
+    if sys.stdin.isatty():
+        response = input("  Remove them from configuration? [y/N] ").lower()
+        if not response.startswith('y'):
+            print("  Skipping removal. BitBake will likely fail.")
+            return
+    else:
+        # In non-interactive mode, we can't safely prune, but we can't let it stay broken either.
+        UI.print_warning("Run this command interactively to fix bblayers.conf.")
+        return
+
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    if not bitbake_yocto_dir:
+        UI.print_error("Could not determine Yocto directory. Cannot prune missing layers.", fatal=True)
+        return
+    bblayers_conf = bitbake_yocto_dir / "build" / "conf" / "bblayers.conf"
+    if not bblayers_conf.exists():
+        return
+        
+    try:
+        content = bblayers_conf.read_text()
+        new_content = content
+        
+        for m in missing:
+            path_str = str(m)
+            
+            lines = new_content.splitlines()
+            cleaned_lines = []
+            for line in lines:
+                if path_str in line and (line.strip().startswith('/') or line.strip().startswith('"')):
+                    if str(m) in line:
+                         print(f"  Removing line: {line.strip()}")
+                         continue
+                cleaned_lines.append(line)
+            
+            new_content = "\n".join(cleaned_lines)
+            
+        if new_content != content:
+            bblayers_conf.write_text(new_content)
+            UI.print_success("Removed missing layers from bblayers.conf")
+            
+    except Exception as e:
+        UI.print_error(f"Failed to update bblayers.conf: {e}")
+
 
 def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache):
     """
@@ -68,7 +138,6 @@ def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache):
         print(f"  Run 'yocto-layers --new <name>' to create a layer first.")
         return None
     
-    # If layer explicitly specified
     if layer_arg:
         layer_name = layer_arg if layer_arg.startswith("meta-") else f"meta-{layer_arg}"
         for layer in all_layers:
@@ -77,14 +146,11 @@ def get_layer_for_command(workspace_root, layer_arg, interactive, no_cache):
         UI.print_error(f"Layer '{layer_name}' not found.")
         return None
     
-    # Auto-detect layer
     cached_layer = None if no_cache else get_cached_layer(workspace_root)
     
-    # Use interactive selection if forced or multiple layers
     if interactive or len(all_layers) > 1:
         return select_layer_interactive(workspace_root, all_layers, cached_layer)
     else:
-        # Single layer - auto-select
         UI.print_item("Auto-detected", all_layers[0].name)
         return all_layers[0]
 
@@ -93,7 +159,6 @@ def show_layer_info(layer_path):
     UI.print_item("Layer Name", layer_path.name)
     UI.print_item("Path", str(layer_path))
     
-    # Count recipes by type
     recipe_dirs = {}
     total_recipes = 0
     
@@ -112,7 +177,6 @@ def show_layer_info(layer_path):
         for category, count in sorted(recipe_dirs.items()):
             print(f"    {UI.GREEN}{category:<15}{UI.NC} : {count} recipes")
     
-    # Check for layer.conf
     layer_conf = layer_path / "conf" / "layer.conf"
     if layer_conf.exists():
         UI.print_success("Layer configuration found")
@@ -141,11 +205,9 @@ def list_layer_recipes(layer_path):
         UI.print_warning("No recipes found in this layer.")
 
 def sync_layers(workspace_root, layers_base):
-    # Find local layers
     local_layers = [d for d in layers_base.iterdir() if d.is_dir() and d.name.startswith("meta-")]
     UI.print_item("Available", f"{len(local_layers)} local layers found")
     
-    # Check currently active layers
     check_layers = run_command("bitbake-layers show-layers")
     
     if "ERROR: The BBPATH variable is not set" in check_layers:
@@ -155,10 +217,9 @@ def sync_layers(workspace_root, layers_base):
 
     active_layers = check_layers.splitlines()
     
-    build_dir = workspace_root / "bitbake-builds" / "poky-master" / "build"
+    build_dir = get_bitbake_yocto_dir(workspace_root) / "build"
     
     for layer_path in local_layers:
-        # Use relative path from build directory to layer for portability in bblayers.conf
         try:
             layer_rel_path = os.path.relpath(layer_path, build_dir)
         except ValueError:
@@ -171,7 +232,6 @@ def sync_layers(workspace_root, layers_base):
             print(f"  Layer '{layer_path.name}' : {UI.GREEN}ACTIVE{UI.NC}")
         else:
             print(f"  Adding layer '{layer_path.name}'...")
-            # Use relative path if possible
             output = run_command(f"bitbake-layers add-layer {layer_rel_path}", cwd=build_dir)
             if "ERROR" in output:
                 UI.print_error(f"Failed to add layer: {output.strip()}")
@@ -179,13 +239,12 @@ def sync_layers(workspace_root, layers_base):
                 UI.print_success(f"Added layer '{layer_path.name}'")
 
     UI.print_header("Active Layer Configuration")
-    # Extract only the summary from show-layers to keep output clean
     layers_summary = run_command("bitbake-layers show-layers")
     for line in layers_summary.splitlines():
         if line.startswith("meta-") or "layer" in line.lower():
             print(f"    {line}")
 
-def scaffold_layer(name, layers_base):
+def scaffold_layer(name, layers_base, workspace_root):
     if not name.startswith("meta-"):
         name = f"meta-{name}"
     
@@ -194,13 +253,14 @@ def scaffold_layer(name, layers_base):
         UI.print_error(f"Layer '{name}' already exists.")
         return
 
+    # Use detected branch for compatibility
+    branch = get_yocto_branch(workspace_root)
     UI.print_item("New Layer", name)
     UI.print_item("Status", "Creating directory structure...")
+    UI.print_item("Branch", branch)
     
-    # Create structure
     (layer_dir / "conf").mkdir(parents=True, exist_ok=True)
     
-    # conf/layer.conf
     layer_conf_content = f"""# We have a conf and classes directory, add to BBPATH
 BBPATH .= ":${{LAYERDIR}}"
 
@@ -213,18 +273,15 @@ BBFILE_PATTERN_{name.replace('meta-', '')} = "^${{LAYERDIR}}/"
 BBFILE_PRIORITY_{name.replace('meta-', '')} = "6"
 
 LAYERDEPENDS_{name.replace('meta-', '')} = "core"
-LAYERSERIES_COMPAT_{name.replace('meta-', '')} = "whinlatter"
+LAYERSERIES_COMPAT_{name.replace('meta-', '')} = "{branch}"
 """
     with open(layer_dir / "conf" / "layer.conf", "w") as f:
         f.write(layer_conf_content)
 
-    # README
     with open(layer_dir / "README", "w") as f:
         f.write(f"This is the {name} layer.\n")
 
     UI.print_success(f"Layer scaffolded at: {layer_dir}")
-    print(f"\n  {UI.BOLD}Next Steps:{UI.NC}")
-    print(f"    Run 'yocto-layers' to register it with your build.")
 
 if __name__ == "__main__":
     main()

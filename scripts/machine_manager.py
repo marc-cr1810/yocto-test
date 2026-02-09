@@ -8,22 +8,19 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI, find_custom_layer, get_yocto_branch, run_command, prune_machine_fragments
+from yocto_utils import UI, find_custom_layer, get_yocto_branch, run_command, prune_machine_fragments, get_bitbake_yocto_dir, get_active_layers, check_branch_compatibility
 from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 SOURCES_DIR = WORKSPACE_ROOT / "yocto" / "sources"
-BUILD_DIR = WORKSPACE_ROOT / "bitbake-builds" / "poky-master" / "build"
+BUILD_DIR = get_bitbake_yocto_dir(WORKSPACE_ROOT) / "build"
 
 def main():
-    # Smart dispatch: If the first argument is not a known command or flag, assume it's a machine name for 'switch'
-    # This preserves 'yocto-machine <name>' behavior while allowing subcommands.
     known_commands = {'list', 'search', 'get', 'new', 'status', 'switch'}
     
     if len(sys.argv) > 1:
         first_arg = sys.argv[1]
         if not first_arg.startswith('-') and first_arg not in known_commands:
-            # Insert 'switch' command
             sys.argv.insert(1, 'switch')
 
     parser = argparse.ArgumentParser(description="Manage Yocto target machines")
@@ -58,13 +55,13 @@ def main():
 
     UI.print_header("Yocto Target Machine Manager")
 
-    poky_dir = WORKSPACE_ROOT / "bitbake-builds" / "poky-master"
-    local_conf = poky_dir / "build" / "conf" / "local.conf"
+    bitbake_yocto_dir = get_bitbake_yocto_dir(WORKSPACE_ROOT)
+    local_conf = bitbake_yocto_dir / "build" / "conf" / "local.conf"
 
     if args.command == "new":
         scaffold_machine(args.name, WORKSPACE_ROOT, args.layer)
     elif args.command == "list":
-        list_machines(WORKSPACE_ROOT, poky_dir)
+        list_machines(WORKSPACE_ROOT, bitbake_yocto_dir)
     elif args.command == "search":
         search_machines(args.term, args.branch)
     elif args.command == "get":
@@ -133,36 +130,15 @@ def get_machine(machine_name, branch_override=None):
         
     UI.print_item("Found", f"{target['machine_name']} in layer {target['layer_name']}")
     
-    # Reuse yocto-get logic slightly adapted for just ensuring the layer
-    # Since we can't easily import ensure_layer_recursive from yocto-get (it's a script), 
-    # we'll implement a simplified version here or shell out to 'yocto-get' with a hack?
-    # No, let's implement the layer fetch logic cleanly.
-    
+    # Check branch compatibility
+    if not check_branch_compatibility(WORKSPACE_ROOT, branch):
+        UI.print_error("Cancelled due to branch mismatch.")
+        return
+
     if ensure_layer(index, target, branch):
          UI.print_success(f"Machine '{machine_name}' is ready.")
          print(f"  Run '{UI.BOLD}yocto-machine {machine_name}{UI.NC}' to switch to it.")
 
-def get_active_layers():
-    output = run_command("bitbake-layers show-layers", cwd=BUILD_DIR)
-    if not output: # run_command returns string if capture=True? 
-         # Wait, yocto_utils.run_command returns stdout string.
-         pass
-    else:
-         # yocto_utils.run_command returns string.
-         pass
-         
-    # Let's rely on bitbake-layers output
-    try:
-        res = subprocess.run("bitbake-layers show-layers", shell=True, check=True, cwd=BUILD_DIR, capture_output=True, text=True)
-        lines = res.stdout.splitlines()
-        layers = []
-        for line in lines:
-             parts = line.split()
-             if len(parts) >= 2 and parts[0] != "layer":
-                 layers.append(parts[0])
-        return layers
-    except:
-        return []
 
 def ensure_layer(index, machine_info, branch):
     layer_name = machine_info['layer_name']
@@ -172,7 +148,7 @@ def ensure_layer(index, machine_info, branch):
     
     UI.print_item("Checking Layer", layer_name)
     
-    active = get_active_layers()
+    active = get_active_layers(WORKSPACE_ROOT)
     if layer_name in active:
         UI.print_success(f"Layer '{layer_name}' is active.")
         return True
@@ -185,9 +161,9 @@ def ensure_layer(index, machine_info, branch):
         UI.print_item("Cloning", f"{vcs_url} ({actual_branch})...")
         SOURCES_DIR.mkdir(parents=True, exist_ok=True)
         if actual_branch:
-            cmd = f"git clone -b {actual_branch} {vcs_url} {repo_path}"
+            cmd = f"git clone --depth 1 -b {actual_branch} {vcs_url} {repo_path}"
         else:
-            cmd = f"git clone {vcs_url} {repo_path}"
+            cmd = f"git clone --depth 1 {vcs_url} {repo_path}"
             
         if subprocess.run(cmd, shell=True).returncode != 0:
              UI.print_error("Clone failed.")
@@ -198,9 +174,21 @@ def ensure_layer(index, machine_info, branch):
         layer_path = repo_path / subdir
         
     UI.print_item("Registering", str(layer_path))
-    if subprocess.run(f"bitbake-layers add-layer {layer_path}", shell=True, cwd=BUILD_DIR).returncode == 0:
+    
+    # Use bitbake-layers with sourced environment
+    bitbake_yocto_dir = get_bitbake_yocto_dir(WORKSPACE_ROOT)
+    rel_yocto = bitbake_yocto_dir.relative_to(WORKSPACE_ROOT)
+    cmd = f"source {rel_yocto}/layers/openembedded-core/oe-init-build-env {rel_yocto}/build && bitbake-layers add-layer {layer_path}"
+    
+    result = subprocess.run(cmd, shell=True, cwd=WORKSPACE_ROOT, executable="/bin/bash", capture_output=True, text=True)
+    if result.returncode == 0:
         return True
     
+    UI.print_error(f"Failed to add layer '{layer_name}'.")
+    if result.stdout:
+        print(f"{UI.RED}{result.stdout}{UI.NC}")
+    if result.stderr:
+        print(f"{UI.RED}{result.stderr}{UI.NC}")
     return False
 
 
@@ -219,7 +207,7 @@ def show_current_machine(local_conf):
                     return
     UI.print_item("Current Machine", "Unknown (not set in local.conf)")
 
-def list_machines(workspace_root, poky_dir):
+def list_machines(workspace_root, bitbake_yocto_dir):
     UI.print_item("Status", "Scanning for available machines...")
     
     from yocto_utils import get_available_machines
@@ -228,7 +216,7 @@ def list_machines(workspace_root, poky_dir):
     if machines['poky']:
         UI.print_item("Poky/Core", ', '.join(machines['poky']))
     if machines['custom']:
-        UI.print_item("Local Layer", f"{UI.GREEN}{', '.join(machines['custom'])}{UI.NC}")
+        UI.print_item("Local Layer", ', '.join(machines['custom']))
     
 
 

@@ -1,13 +1,13 @@
-SUMMARY = "example application"
+SUMMARY = "legs_main application"
 LICENSE = "CLOSED"
-
-DEPENDS = "spdlog"
+PN = "legs_main"
+PV = "1.0"
 
 inherit cmake
 
 # Use local source code directly
 inherit externalsrc
-EXTERNALSRC = "${THISDIR}/../../../../../sw/cpp/example"
+EXTERNALSRC = "${THISDIR}/../../../../../sw/cpp/legs_main"
 EXTERNALSRC_BUILD = "${WORKDIR}/build"
 
 

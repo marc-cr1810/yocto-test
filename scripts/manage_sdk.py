@@ -12,7 +12,9 @@ from yocto_utils import (
     find_custom_layer,
     get_cached_image,
     set_cached_image,
-    select_image_interactive
+    select_image_interactive,
+    get_bitbake_yocto_dir,
+    get_yocto_branch
 )
 
 def list_sdks(deploy_dir_sdk):
@@ -66,8 +68,8 @@ def main():
     UI.print_header("Yocto SDK Manager")
 
     workspace_root = Path(__file__).resolve().parent.parent
-    poky_dir = workspace_root / "bitbake-builds" / "poky-master"
-    deploy_dir_sdk = poky_dir / "build" / "tmp" / "deploy" / "sdk"
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    deploy_dir_sdk = bitbake_yocto_dir / "build" / "tmp" / "deploy" / "sdk"
 
     if args.list:
         list_sdks(deploy_dir_sdk)

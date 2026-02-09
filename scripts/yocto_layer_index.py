@@ -30,8 +30,6 @@ class LayerIndex:
                     return json.loads(response.read().decode())
                 return []
         except Exception as e:
-            # Silently fail or log for now, as CLI tools handle empty results
-            # print(f"DEBUG: Error querying {url}: {e}", file=sys.stderr)
             return []
 
     def get_branch_id(self) -> Optional[int]:
@@ -53,7 +51,6 @@ class LayerIndex:
         if not branch_id:
             return
             
-        # This might return a few hundred items, which is fine
         results = self._make_request("layerBranches", {"filter": f"branch:{branch_id}"})
         for lb in results:
             self._layerbranch_cache[lb['id']] = lb
@@ -76,6 +73,22 @@ class LayerIndex:
             return results[0]
         return None
 
+    def get_layerbranch_for_layer(self, layer_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Find the layerbranch for a given layer_id in the *current* branch context.
+        """
+        if not self._prefetched_branches:
+            self.prefetch_layerbranches()
+            
+        # Linear search through cache (fast enough for typical layer counts)
+        for lb in self._layerbranch_cache.values():
+            if lb['layer'] == layer_id:
+                # Double check branch match just in case
+                if self._branch_id and lb['branch'] != self._branch_id:
+                    continue
+                return lb
+        return None
+
     def get_layer_item(self, layer_id: int) -> Optional[Dict[str, Any]]:
         if layer_id in self._layer_cache:
             return self._layer_cache[layer_id]
@@ -94,12 +107,6 @@ class LayerIndex:
         branch_id = self.get_branch_id()
         if not branch_id:
             return []
-            
-        # 1. Find correct LayerBranch
-        # We need to filter by both layer and branch, but since we can't reliably do multiple filters,
-        # we fetch by layer and filter in Python.
-        # Optimziation: Fetch deps by layerbranch ID directly if known? 
-        # But we start with layer_id usually.
         
         # Get all branches for this layer
         layerbranches = self._make_request("layerBranches", {"filter": f"layer:{layer_id}"})
@@ -119,15 +126,11 @@ class LayerIndex:
         dep_layers = []
         for d in deps:
             dep_layer_id = d['dependency']
-            # We could optimize this by fetching items in batch or caching, 
-            # but usually deps are few (<5).
             l = self.get_layer_item(dep_layer_id)
             if l:
                 dep_layers.append(l)
                 
         return dep_layers
-
-    # Previous duplicate get_layerbranch removed if it existed, but here we replace up to get_recipe_layer_info
     
     def get_recipe_layer_info(self, recipe: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

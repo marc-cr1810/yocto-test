@@ -5,17 +5,11 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI
+from yocto_utils import UI, get_bitbake_yocto_dir
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Show the last Yocto build error")
-    parser.parse_args()
-
-    workspace_root = Path(__file__).resolve().parent.parent
-    build_tmp_work = workspace_root / "bitbake-builds" / "poky-master" / "build" / "tmp" / "work"
-
-    UI.print_header("Latest Build Error Diagnosis")
+def get_latest_log(workspace_root):
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    build_tmp_work = bitbake_yocto_dir / "build" / "tmp" / "work"
 
     if not build_tmp_work.exists():
         UI.print_error(f"Build work directory not found at {build_tmp_work}", fatal=True)
@@ -28,7 +22,7 @@ def main():
         # Check both tmp/work and tmp/work-shared
         search_dirs = [
             build_tmp_work,
-            workspace_root / "bitbake-builds" / "poky-master" / "build" / "tmp" / "work-shared"
+            bitbake_yocto_dir / "build" / "tmp" / "work-shared"
         ]
         
         for search_dir in search_dirs:
@@ -49,6 +43,19 @@ def main():
 
     UI.print_item("Latest Log", latest_log.name)
     UI.print_item("Path", str(latest_log))
+    
+    return latest_log
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Show the last Yocto build error")
+    parser.parse_args()
+
+    workspace_root = Path(__file__).resolve().parent.parent
+
+    UI.print_header("Latest Build Error Diagnosis")
+
+    latest_log = get_latest_log(workspace_root)
     
     # Check for actual errors in the log
     has_error = False
