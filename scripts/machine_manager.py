@@ -221,33 +221,93 @@ def list_machines(workspace_root, bitbake_yocto_dir):
 
 
 def switch_machine(target_machine, local_conf):
-    if not local_conf.exists():
-        UI.print_error(f"{local_conf} does not exist.")
-        return
+    import config_manager
+    
+    # 1. Check for available fragments
+    available_fragments = config_manager.get_available_fragments()
+    target_fragment = None
+    
+    # Try exact match or suffix match for machine fragments
+    # e.g. "machine/qemuarm64" or "my-layer/machine/my-machine"
+    for name in available_fragments.keys():
+        if name == f"machine/{target_machine}" or name.endswith(f"/machine/{target_machine}"):
+            target_fragment = name
+            break
+            
+    # Special case for built-in fragments that might not be in layers but are known
+    # If we can't find it in layers but we know we are switching to it, 
+    # and it was already active as a fragment, we should probably stick to fragment mode?
+    # For now, let's rely on detection. If detection fails, we fall back to local.conf.
+    
+    # However, we must ensure we don't have BOTH.
+    
+    active_fragments = config_manager.get_fragments()
+    
+    # Helper to remove active machine fragments
+    def disable_machine_fragments():
+        for frag in active_fragments:
+            if "/machine/" in frag or frag.startswith("machine/"):
+                if frag != target_fragment: # Don't disable if it's the one we want (optimization)
+                   config_manager.disable_fragment(frag)
 
-    with open(local_conf, "r") as f:
-        lines = f.readlines()
+    if target_fragment:
+        UI.print_item("Configuration", f"Using fragment '{target_fragment}'")
+        
+        # Enable the fragment
+        if target_fragment not in active_fragments:
+            config_manager.enable_fragment(target_fragment)
+            
+        # Disable other machine fragments
+        disable_machine_fragments()
+        
+        # Remove MACHINE from local.conf to avoid conflict
+        if local_conf.exists():
+            with open(local_conf, "r") as f:
+                lines = f.readlines()
+            
+            new_lines = [line for line in lines if not line.strip().startswith("MACHINE")]
+            
+            if len(lines) != len(new_lines):
+                 with open(local_conf, "w") as f:
+                    f.writelines(new_lines)
+                 UI.print_item("local.conf", "Removed explicit MACHINE setting (conflict prevented)")
+                 
+    else:
+        UI.print_item("Configuration", f"Setting MACHINE in local.conf")
+        
+        # We are using local.conf, so we MUST disable any machine fragments to prevent conflict
+        disable_machine_fragments()
 
-    updated = False
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith("MACHINE"):
-            new_lines.append(f'MACHINE = "{target_machine}"\n')
-            updated = True
-        else:
-            new_lines.append(line)
+        if not local_conf.exists():
+            UI.print_error(f"{local_conf} does not exist.")
+            return
 
-    if not updated:
-        # Prepend to the file if MACHINE not found
-        new_lines.insert(0, f'MACHINE = "{target_machine}"\n')
+        with open(local_conf, "r") as f:
+            lines = f.readlines()
 
-    with open(local_conf, "w") as f:
-        f.writelines(new_lines)
+        updated = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith("MACHINE"):
+                new_lines.append(f'MACHINE = "{target_machine}"\n')
+                updated = True
+            else:
+                new_lines.append(line)
+
+        if not updated:
+            # Prepend to the file if MACHINE not found
+            new_lines.insert(0, f'MACHINE = "{target_machine}"\n')
+
+        with open(local_conf, "w") as f:
+            f.writelines(new_lines)
 
     UI.print_item("Target Machine", target_machine)
-    UI.print_success("Successfully updated local.conf")
+    UI.print_success(f"Switched to {target_machine}")
 
 def scaffold_machine(name, workspace_root, layer_name):
+    from yocto_utils import sanitize_yocto_name
+    name = sanitize_yocto_name(name, "machine")
+    
     try:
         layer_dir = find_custom_layer(workspace_root, layer_name)
     except RuntimeError as e:

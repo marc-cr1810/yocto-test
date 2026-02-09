@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import UI, get_all_custom_layers, get_cached_layer
+from yocto_utils import UI, get_all_custom_layers, get_cached_layer, sanitize_yocto_name
 
 def main():
     parser = argparse.ArgumentParser(description="Scaffold a new project (C++, Rust, Go, Python, or Kernel Module) and add it to Yocto")
@@ -32,9 +32,11 @@ def main():
         "python": "python"
     }
     
+    # Sanitize project name
+    project_name = sanitize_yocto_name(args.name, "project")
+    
     lang_dir = type_to_dir.get(args.type, "cpp")
-    sw_dir = workspace_root / "sw" / lang_dir / args.name
-    project_name = args.name
+    sw_dir = workspace_root / "sw" / lang_dir / project_name
 
     if sw_dir.exists():
         UI.print_error(f"Project directory {sw_dir} already exists.", fatal=True)

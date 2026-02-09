@@ -8,155 +8,26 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from yocto_utils import (
-    UI,
-    run_command,
-    get_bitbake_yocto_dir,
-    find_custom_layer,
-    get_all_custom_layers,
-    set_cached_layer,
-    get_cached_layer,
-    get_cached_image,
-    find_image_recipes,
-    add_package_to_image,
-    set_cached_image
-)
-
-# Special case mappings (only for packages that don't follow the lowercase convention)
-CMAKE_TO_YOCTO_MAP = {
-    "OpenSSL": "openssl",
-    "ZLIB": "zlib",
-    "GTest": "googletest",
-    "Protobuf": "protobuf",
-    "CURL": "curl",
-    "SQLite3": "sqlite3",
-    "Threads": "",  # Built-in to toolchain
-}
-
-def detect_dependencies(project_dir, workspace_root, layer_dir=None):
-    deps = set()
-    cmake_lists = project_dir / "CMakeLists.txt"
-    if cmake_lists.exists():
-        with open(cmake_lists, "r") as f:
-            content = f.read()
-            
-            # Find common CMake find_package calls
-            matches = re.findall(r"find_package\s*\(\s*(\w+)", content, re.IGNORECASE)
-            for m in matches:
-                # Check if it's in the special case map
-                if m in CMAKE_TO_YOCTO_MAP:
-                    yocto_dep = CMAKE_TO_YOCTO_MAP[m]
-                    if yocto_dep:  # Skip empty strings (like Threads)
-                        deps.add(yocto_dep)
-                else:
-                    # Check if it's an internal dependency (another project in sw/)
-                    # Search across all language directories
-                    sw_dir = workspace_root / "sw"
-                    found = False
-                    for lang_dir in ["cpp", "rust", "go", "python", "module"]:
-                        if (sw_dir / lang_dir / m.lower()).exists():
-                            deps.add(m.lower())
-                            found = True
-                            break
-                    
-                    if not found:
-                        # Check if a recipe exists for this dependency in the layer
-                        if layer_dir:
-                            recipe_pattern = f"{m.lower()}_*.bb"
-                            if list(layer_dir.rglob(recipe_pattern)):
-                                deps.add(m.lower())
-                                found = True
-                        
-                        if not found:
-                            # Default: convert to lowercase (most packages follow this convention)
-                            # e.g., spdlog -> spdlog, nlohmann_json -> nlohmann_json
-                            deps.add(m.lower())
-    return sorted(list(filter(None, deps)))
-
-def detect_rust_dependencies(project_dir):
-    """Detect Rust dependencies from Cargo.toml"""
-    deps = set()
-    cargo_toml = project_dir / "Cargo.toml"
-    if cargo_toml.exists():
-        with open(cargo_toml, "r") as f:
-            content = f.read()
-            # Simple regex to find dependencies (not a full TOML parser)
-            # Matches lines like: serde = "1.0"
-            matches = re.findall(r'^(\w+)\s*=', content, re.MULTILINE)
-            for dep in matches:
-                # Filter out package metadata fields
-                if dep not in ['name', 'version', 'edition', 'authors']:
-                    deps.add(dep)
-    return sorted(list(deps))
-
-def detect_go_dependencies(project_dir):
-    """Detect Go module path from go.mod
-    
-    Note: Go dependencies are NOT added to DEPENDS as the Go build system
-    handles module dependencies automatically during build.
-    """
-    go_mod = project_dir / "go.mod"
-    if go_mod.exists():
-        with open(go_mod, "r") as f:
-            content = f.read()
-            # Extract module name from first line: module github.com/user/project
-            match = re.search(r'^module\s+(\S+)', content, re.MULTILINE)
-            if match:
-                return match.group(1)
-    return None
-
-def detect_python_dependencies(project_dir):
-    """Detect Python dependencies from setup.py or pyproject.toml"""
-    deps = set()
-    
-    # Try setup.py first
-    setup_py = project_dir / "setup.py"
-    if setup_py.exists():
-        with open(setup_py, "r") as f:
-            content = f.read()
-            # Find install_requires list
-            match = re.search(r'install_requires\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            if match:
-                deps_str = match.group(1)
-                # Extract package names (strip quotes and version specs)
-                matches = re.findall(r'["\']([^"\'>=<\[]+)', deps_str)
-                deps.update(matches)
-    
-    # Try pyproject.toml
-    pyproject = project_dir / "pyproject.toml"
-    if pyproject.exists():
-        with open(pyproject, "r") as f:
-            content = f.read()
-            # Find dependencies in [project] section
-            matches = re.findall(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            for match in matches:
-                pkg_matches = re.findall(r'["\']([^"\'>=<\[]+)', match)
-                deps.update(pkg_matches)
-    
-    return sorted(list(deps))
-
-def main():
-    parser = argparse.ArgumentParser(description="Add a project to a Yocto layer")
-    parser.add_argument("project_path", help="Path to the project directory (or name if using --url)")
-    parser.add_argument("--layer", default=None, help="Target layer name (default: auto-detect)")
-    parser.add_argument("--recipe-dir", default="core", help="Recipe subdirectory (default: core)")
-    parser.add_argument("--pv", default="1.0", help="Package version (default: 1.0)")
-    parser.add_argument("--type", choices=["cpp", "cmake", "autotools", "makefile", "module", "rust", "go", "python", "auto"], 
-                        default="auto", help="Project type (default: auto)")
-    parser.add_argument("--library", action="store_true", help="Package is a library")
-    parser.add_argument("--add-to-image", action="store_true", default=None, help="Add package to image IMAGE_INSTALL")
-    parser.add_argument("--no-add-to-image", action="store_false", dest="add_to_image", help="Do not add package to image")
-    parser.add_argument("--image", help="Target image name for integration")
-    parser.add_argument("--url", help="Git URL to add as a submodule")
-    args = parser.parse_args()
-
-    UI.print_header("Add Project to Yocto")
-
-    workspace_root = Path(__file__).resolve().parent.parent
+    from yocto_utils import (
+        UI,
+        run_command,
+        get_bitbake_yocto_dir,
+        find_custom_layer,
+        get_all_custom_layers,
+        set_cached_layer,
+        get_cached_layer,
+        get_cached_image,
+        find_image_recipes,
+        add_package_to_image,
+        set_cached_image,
+        sanitize_yocto_name
+    )
 
     if args.url:
         UI.print_item("Git URL", args.url)
-        project_name = args.project_path  # Treat first arg as name
+        # Treat first arg as name, sanitize it
+        project_name = sanitize_yocto_name(args.project_path, "project")
+        
         submodules_dir = workspace_root / "submodules"
         submodules_dir.mkdir(exist_ok=True)
         project_dir = submodules_dir / project_name
@@ -174,7 +45,9 @@ def main():
                 UI.print_error(f"Failed to add submodule: {e}", fatal=True)
     else:
         project_dir = Path(args.project_path).resolve()
-        project_name = project_dir.name
+        # Sanitize project name
+        project_name = sanitize_yocto_name(project_dir.name, "project")
+        
         if not project_dir.exists():
             UI.print_error(f"Project directory {project_dir} does not exist.", fatal=True)
 
@@ -280,14 +153,7 @@ def main():
     lic_file = project_dir / "LICENSE"
     if lic_file.exists():
         license_text = 'LICENSE = "MIT"\nLIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"'
-        
-    pn_override = ""
-    if "_" in project_name:
-        # Detect if BitBake might misinterpret the name (e.g. some_project_1.0 -> PN=some, PV=project_1.0)
-        # We force PN to be the project name to matching directory name
-        # We also MUST set PV to avoid recursion errors (PV -> BP -> PN -> PV)
-        pn_override = f'PN = "{project_name}"\nPV = "{args.pv}"'
-        
+                
     depends_str = ""
     if detected_deps:
         depends_str = f'DEPENDS = "{" ".join(detected_deps)}"'
@@ -296,7 +162,6 @@ def main():
     if project_type in ["cpp", "cmake", "autotools"]:
         recipe_content = f"""SUMMARY = "{project_name} application"
 {license_text}
-{pn_override}
 
 {inherit_class}
 

@@ -78,6 +78,25 @@ class UI:
         # Optional: could be empty or a subtle divider
         pass
 
+def sanitize_yocto_name(name: str, context: str = "item") -> str:
+    """
+    Sanitize a name to be Yocto-compliant (replace underscores with hyphens).
+    
+    Args:
+        name: The name to sanitize.
+        context: The type of item being named (e.g., "recipe", "layer", "machine").
+        
+    Returns:
+        The sanitized name.
+    """
+    if "_" in name:
+        sanitized = name.replace("_", "-")
+        UI.print_warning(f"{context.capitalize()} name '{name}' contains underscores, which are not allowed.")
+        UI.print_item("Renaming", f"'{name}' -> '{sanitized}'")
+        return sanitized
+    return name
+
+
 def run_command(cmd, cwd=None):
     try:
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True, cwd=cwd)
@@ -840,10 +859,8 @@ def prune_machine_fragments(workspace_root: Path):
         return
 
     bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
-    # Use the collection name instead of directory name where possible
-    # to avoid hardcoding "meta-test" etc.
-    if config_mode:
-        toolcfg = bitbake_yocto_dir / "build" / "conf" / "toolcfg.conf"
+    
+    toolcfg = bitbake_yocto_dir / "build" / "conf" / "toolcfg.conf"
     
     if not toolcfg.exists():
         return

@@ -206,6 +206,13 @@ def list_layer_recipes(layer_path):
 
 def sync_layers(workspace_root, layers_base):
     local_layers = [d for d in layers_base.iterdir() if d.is_dir() and d.name.startswith("meta-")]
+    
+    # Also check sources for layers (cloned by yocto-machine)
+    sources_dir = workspace_root / "yocto" / "sources"
+    if sources_dir.exists():
+        for d in sources_dir.iterdir():
+            if d.is_dir() and d.name.startswith("meta-"):
+                local_layers.append(d)
     UI.print_item("Available", f"{len(local_layers)} local layers found")
     
     check_layers = run_command("bitbake-layers show-layers")
@@ -240,12 +247,26 @@ def sync_layers(workspace_root, layers_base):
 
     UI.print_header("Active Layer Configuration")
     layers_summary = run_command("bitbake-layers show-layers")
+    
+    # Skip the first few lines if they are just generic output, assume header starts with "layer"
+    start_printing = False
     for line in layers_summary.splitlines():
-        if line.startswith("meta-") or "layer" in line.lower():
+        if "layer" in line.lower() and "path" in line.lower() and "priority" in line.lower():
+            start_printing = True
+        
+        if start_printing and line.strip():
             print(f"    {line}")
 
 def scaffold_layer(name, layers_base, workspace_root):
-    if not name.startswith("meta-"):
+    from yocto_utils import sanitize_yocto_name
+    
+    # Sanitize layer name (without meta- prefix first)
+    if name.startswith("meta-"):
+        core_name = name[5:]
+        core_name = sanitize_yocto_name(core_name, "layer")
+        name = f"meta-{core_name}"
+    else:
+        name = sanitize_yocto_name(name, "layer")
         name = f"meta-{name}"
     
     layer_dir = layers_base / name

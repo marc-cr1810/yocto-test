@@ -1,13 +1,13 @@
 SUMMARY = "axi_dma kernel module"
 LICENSE = "CLOSED"
-PN = "axi_dma"
+PN = "axi-dma"
 PV = "1.0"
 
 inherit module
 
 # Use local source code directly
 inherit externalsrc
-EXTERNALSRC = "${THISDIR}/../../../../../sw/module/axi_dma"
+EXTERNALSRC = "${THISDIR}/../../../../../sw/module/axi-dma"
 EXTERNALSRC_BUILD = "${WORKDIR}/build"
 
 # Set up build directory with symlinks to source files
