@@ -38,11 +38,18 @@ def get_available_distros(workspace_root):
                     continue
                 distros[conf.stem] = conf
                 
+    # Add implicit 'nodistro' if we are in a pure OE environment (no poky)
+    poky_layer = bitbake_yocto_dir / "layers" / "meta-yocto" / "meta-poky"
+    if not poky_layer.exists():
+        distros['nodistro'] = None # No specific file, it's the default
+                
     return distros
 
 def get_current_distro(workspace_root):
     """Get the current DISTRO from local.conf"""
-    local_conf = get_bitbake_yocto_dir(workspace_root) / "build" / "conf" / "local.conf"
+    bitbake_yocto_dir = get_bitbake_yocto_dir(workspace_root)
+    local_conf = bitbake_yocto_dir / "build" / "conf" / "local.conf"
+    
     if not local_conf.exists():
         return None
         
@@ -55,7 +62,12 @@ def get_current_distro(workspace_root):
             return matches[-1]
     except:
         pass
-    return "poky" # Default fallback
+        
+    # Default fallback: check if we are in Poky or pure OE
+    poky_layer = bitbake_yocto_dir / "layers" / "meta-yocto" / "meta-poky"
+    if poky_layer.exists():
+        return "poky"
+    return "nodistro"
 
 def set_distro(workspace_root, distro_name):
     """Update DISTRO in local.conf"""
@@ -66,18 +78,28 @@ def set_distro(workspace_root, distro_name):
     try:
         content = local_conf.read_text()
         
-        # Check if DISTRO is already set
-        if re.search(r'^DISTRO\s*\??=', content, re.MULTILINE):
-            # Replace existing
-            new_content = re.sub(
-                r'^(DISTRO\s*\??=\s*)["\'][^"\']+["\']',
-                f'\\1"{distro_name}"',
-                content,
-                flags=re.MULTILINE
-            )
+        # If setting to 'nodistro' in a pure OE env, we might want to just UNSET it
+        # But to be safe and explicit, let's see.
+        # If 'nodistro' doesn't have a conf file, we MUST unset it.
+        available = get_available_distros(workspace_root)
+        is_implicit = (distro_name == 'nodistro' and available.get('nodistro') is None)
+        
+        if is_implicit:
+            # Remove DISTRO variable to revert to default
+            new_content = re.sub(r'^DISTRO\s*\??=.*$\n?', '', content, flags=re.MULTILINE)
         else:
-            # Append if missing
-            new_content = content + f'\nDISTRO ?= "{distro_name}"\n'
+            # Check if DISTRO is already set
+            if re.search(r'^DISTRO\s*\??=', content, re.MULTILINE):
+                # Replace existing
+                new_content = re.sub(
+                    r'^(DISTRO\s*\??=\s*)["\'][^"\']+["\']',
+                    f'\\1"{distro_name}"',
+                    content,
+                    flags=re.MULTILINE
+                )
+            else:
+                # Append if missing
+                new_content = content + f'\nDISTRO ?= "{distro_name}"\n'
             
         local_conf.write_text(new_content)
         return True
