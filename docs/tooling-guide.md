@@ -160,6 +160,12 @@ Manages configuration fragments in `toolcfg.conf` (e.g. `machine/qemuarm64`).
 - **Enable**: `yocto-config enable <fragment>`
 - **Disable**: `yocto-config disable <fragment>`
 
+### `yocto-init`
+Manages the system init manager configuration (e.g. `systemd`, `sysvinit`).
+- **List**: `yocto-init list`
+- **Set**: `yocto-init set <name>`
+- **Show**: `yocto-init show`
+
 
 ### `yocto-layers`
 Synchronizes the BitBake configuration with the local layers or scaffolds new layers.

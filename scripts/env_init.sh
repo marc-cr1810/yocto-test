@@ -72,6 +72,7 @@ yocto-menu() { yocto_menu.py "$@"; }
 yocto-query() { yocto_query.py "$@"; }
 yocto-flash() { yocto_flash.py "$@"; }
 yocto-distro() { yocto_distro.py "$@"; }
+yocto-init() { yocto_init_manager.py "$@"; }
 
 # Alias for familiarity with kernel workflow
 alias makemenu="yocto-menu"
@@ -110,6 +111,7 @@ echo -e "    ${GREEN}yocto-query${NC} <VAR>   : Inspect Yocto variable"
 echo -e "  ${BOLD}System:${NC}"
 echo -e "    ${GREEN}yocto-machine${NC}       : Manage target machines"
 echo -e "    ${GREEN}yocto-distro${NC}        : Manage distribution (poky, etc)"
+echo -e "    ${GREEN}yocto-init${NC}          : Manage init system (systemd, etc)"
 echo -e "    ${GREEN}yocto-layers${NC}        : Manage custom layers"
 echo -e "    ${GREEN}yocto-ide${NC}           : Refresh IDE logic"
 

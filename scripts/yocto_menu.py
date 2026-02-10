@@ -20,6 +20,7 @@ try:
     import config_manager
     import update_image
     import yocto_distro
+    import yocto_init_manager
     from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
     from yocto_utils import get_yocto_branch
 except ImportError:
@@ -28,6 +29,7 @@ except ImportError:
     config_manager = None
     update_image = None
     yocto_distro = None
+    yocto_init_manager = None
     LayerIndex = None
     DEFAULT_BRANCH = "master"
     get_yocto_branch = lambda x: DEFAULT_BRANCH
@@ -262,6 +264,7 @@ class YoctoMenuApp:
             MenuItem("List Machines", self.action_list_machines, "List and switch target machines"),
             MenuItem("Manage Distro", self.action_manage_distro, "List and switch Yocto distributions"),
             MenuItem("Manage Fragments", self.action_manage_fragments, "Enable/Disable configuration fragments"),
+            MenuItem("Manage Init System", self.action_manage_init_manager, "Select system init manager (systemd, sysvinit)"),
             MenuItem("Select Search Branch", self.action_select_branch, "Set Yocto release branch for searches"),
             MenuItem("Search Machine", self.action_search_machine, "Search for machines in Layer Index"),
             MenuItem("Get Machine", self.action_get_machine, "Fetch and install a machine's layer"),
@@ -798,6 +801,48 @@ class YoctoMenuApp:
             self.show_message(f"Error loading distros: {e}")
 
     def _set_distro(self, distro_name):
+        if yocto_distro.set_distro(self.workspace_root, distro_name):
+            self.show_message(f"Distro set to '{distro_name}'")
+        else:
+            self.show_message("Failed to set distro.")
+
+    def action_manage_init_manager(self):
+        """Manage Init System."""
+        try:
+            # We can use the same pattern as manage_distro or list machines
+            # Let's list available and current, allow setting
+            
+            # Re-implement a mini-menu or just use selection?
+            # Selection menu is cleanest
+            
+            current = yocto_init_manager.get_current_init_manager(self.workspace_root)
+            available = yocto_init_manager.get_available_init_managers(self.workspace_root)
+            
+            if not available:
+                self.show_message("No init managers found.")
+                return
+
+            items = []
+            for mgr in available:
+                label = mgr
+                desc = "Available Init Manager"
+                if mgr == current:
+                    label = f"* {mgr}"
+                    desc = "Current Active Init Manager"
+                    
+                items.append(MenuItem(label, lambda x=mgr: self._set_init_manager(x), desc))
+            
+            menu = Menu("Select Init Manager", items)
+            self.enter_menu(menu)
+            
+        except Exception as e:
+            self.show_message(f"Error loading init managers: {e}")
+
+    def _set_init_manager(self, manager):
+        if yocto_init_manager.set_init_manager(self.workspace_root, manager):
+            self.show_message(f"Init Manager set to '{manager}'")
+        else:
+            self.show_message("Failed to set init manager.")
         """Set the active distro."""
         if yocto_distro.set_distro(self.workspace_root, distro_name):
             self.show_message(f"Distro set to: {distro_name}")
