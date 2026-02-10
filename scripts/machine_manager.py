@@ -96,7 +96,7 @@ def search_machines(term, branch_override=None):
         UI.print_warning(f"Found machines matching '{term}' but none for branch '{branch}'.")
         if not branch_override:
              print(f"  Tip: Try specifying a different branch with {UI.BOLD}--branch <name>{UI.NC}")
-             print(f"       e.g. {UI.BOLD}yocto-machine --search {term} --branch master{UI.NC}")
+             print(f"       e.g. {UI.BOLD}yocto-machine search {term} --branch master{UI.NC}")
         return
         
     print(f"\n  {UI.BOLD}{'Machine':<30} {'Layer':<25} {'Description'}{UI.NC}")
@@ -125,7 +125,6 @@ def get_machine(machine_name, branch_override=None):
             
     if not target:
         UI.print_error(f"Machine '{machine_name}' not found for branch '{branch}'.")
-        # Try fuzzy match?
         return
         
     UI.print_item("Found", f"{target['machine_name']} in layer {target['layer_name']}")
@@ -137,7 +136,7 @@ def get_machine(machine_name, branch_override=None):
 
     if ensure_layer(index, target, branch):
          UI.print_success(f"Machine '{machine_name}' is ready.")
-         print(f"  Run '{UI.BOLD}yocto-machine {machine_name}{UI.NC}' to switch to it.")
+         print(f"  Run '{UI.BOLD}yocto-machine switch {machine_name}{UI.NC}' to switch to it.")
 
 
 def ensure_layer(index, machine_info, branch):
@@ -233,13 +232,6 @@ def switch_machine(target_machine, local_conf):
         if name == f"machine/{target_machine}" or name.endswith(f"/machine/{target_machine}"):
             target_fragment = name
             break
-            
-    # Special case for built-in fragments that might not be in layers but are known
-    # If we can't find it in layers but we know we are switching to it, 
-    # and it was already active as a fragment, we should probably stick to fragment mode?
-    # For now, let's rely on detection. If detection fails, we fall back to local.conf.
-    
-    # However, we must ensure we don't have BOTH.
     
     active_fragments = config_manager.get_fragments()
     
@@ -346,7 +338,7 @@ IMAGE_FSTYPES += "tar.bz2 ext4 wic"
 
     UI.print_success(f"Machine '{name}' scaffolded.")
     UI.print_item("Config Path", str(machine_file))
-    print(f"\n  Run '{UI.BOLD}yocto-machine {name}{UI.NC}' to activate it.")
+    print(f"\n  Run '{UI.BOLD}yocto-machine switch {name}{UI.NC}' to activate it.")
 
 
 

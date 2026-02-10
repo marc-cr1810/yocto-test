@@ -148,28 +148,57 @@ def main():
         sys.exit(0)
 
     # 4. Flash
-    # Prefer bmaptool if available and if we have a wic/bz2
-    has_bmap = shutil.which("bmaptool") is not None
-    # Check if wic.bmap exists
-    bmap_file = image_path.with_suffix(image_path.suffix + ".bmap") # Approximation
-    # Actual bmap file naming might vary.
+    # 4. Flash
+    # Prefer bmaptool if available and bmap file exists
+    bmaptool_path = shutil.which("bmaptool")
     
+    # Check multiple locations for bmap file
+    bmap_candidates = [
+        image_path.with_suffix(".bmap"),            # e.g. image.wic.bz2 -> image.wic.bmap
+        image_path.with_name(image_path.name + ".bmap") # e.g. image.wic -> image.wic.bmap
+    ]
+    
+    bmap_file = None
+    for cand in bmap_candidates:
+        if cand.exists():
+            bmap_file = cand
+            break
+    
+    use_bmap = False
+    if bmaptool_path and bmap_file:
+        use_bmap = True
+        UI.print_item("Method", "bmaptool (fast & safe)")
+        UI.print_item("Bmap", bmap_file.name)
+    else:
+        UI.print_item("Method", "dd (sector-by-sector)")
+
     UI.print_item("Status", "Flashing...")
     
     try:
-        # Use dd with status=progress
-        cmd = ["sudo", "dd", f"if={image_path}", f"of={target_dev}", "bs=4M", "status=progress", "conv=fsync"]
-        
-        # If compressed, we need to decompress
-        if str(image_path).endswith(".tar.bz2"):
-            # Not bootable typically
-            UI.print_warning("Selected image is a tarball, not a disk image. It may not be bootable.")
-        elif str(image_path).endswith(".gz"):
-            cmd = f"gunzip -c {image_path} | sudo dd of={target_dev} bs=4M status=progress conv=fsync"
-            subprocess.run(cmd, shell=True, check=True)
-            sys.exit(0)
+        if use_bmap:
+            # bmaptool handles decompression automatically
+            cmd = ["sudo", bmaptool_path, "copy", str(image_path), target_dev, "--bmap", str(bmap_file)]
+            subprocess.run(cmd, check=True)
+        else:
+            # Fallback to dd
+            cmd = ["sudo", "dd", f"if={image_path}", f"of={target_dev}", "bs=4M", "status=progress", "conv=fsync"]
             
-        subprocess.run(cmd, check=True)
+            # If compressed, we need to decompress
+            if str(image_path).endswith(".tar.bz2"):
+                # Not bootable typically
+                UI.print_warning("Selected image is a tarball, not a disk image. It may not be bootable.")
+                subprocess.run(cmd, check=True)
+            elif str(image_path).endswith(".gz"):
+                cmd = f"gunzip -c {image_path} | sudo dd of={target_dev} bs=4M status=progress conv=fsync"
+                subprocess.run(cmd, shell=True, check=True)
+            elif str(image_path).endswith(".bz2"):
+                cmd = f"bunzip2 -c {image_path} | sudo dd of={target_dev} bs=4M status=progress conv=fsync"
+                subprocess.run(cmd, shell=True, check=True)
+            elif str(image_path).endswith(".xz"):
+                 cmd = f"xz -dc {image_path} | sudo dd of={target_dev} bs=4M status=progress conv=fsync"
+                 subprocess.run(cmd, shell=True, check=True)
+            else:
+                subprocess.run(cmd, check=True)
         
         UI.print_success("Flashing complete!")
         print("  You may now remove the SD card.")

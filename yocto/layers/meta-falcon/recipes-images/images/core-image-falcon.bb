@@ -4,10 +4,13 @@ LICENSE = "MIT"
 inherit core-image
 
 IMAGE_INSTALL = "    ${CORE_IMAGE_EXTRA_INSTALL} \
-    axi-dma \
+    gps-sim \
     legs-main \
     packagegroup-core-boot \
-    vim \
+    pps-sim \
 "
 
+IMAGE_FEATURES += "ssh-server-openssh"
+
 IMAGE_LINGUAS = " "
+

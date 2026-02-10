@@ -53,7 +53,7 @@ def get_fragments():
     """Read and parse OE_FRAGMENTS from toolcfg.conf."""
     try:
         content = TOOLCFG_PATH.read_text()
-        match = re.search(r'OE_FRAGMENTS\s*\+=\s*"([^"]+)"', content)
+        match = re.search(r'OE_FRAGMENTS\s*\+=\s*"([^"]*)"', content)
         if match:
             # Split by whitespace and filter empty strings
             fragments = [f.strip() for f in match.group(1).split()]
@@ -74,7 +74,7 @@ def save_fragments(fragments):
         # Replace the OE_FRAGMENTS line
         # We look for the line with OE_FRAGMENTS += "..."
         new_content = re.sub(
-            r'(OE_FRAGMENTS\s*\+=\s*)"([^"]+)"', 
+            r'(OE_FRAGMENTS\s*\+=\s*)"([^"]*)"', 
             f'\\1"{new_val}"', 
             content
         )

@@ -1,4 +1,4 @@
-obj-m += axi_dma.o
+obj-m += gps-sim.o
 
 SRC := $(shell pwd)
 

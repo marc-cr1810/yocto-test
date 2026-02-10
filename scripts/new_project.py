@@ -136,6 +136,7 @@ install(TARGETS {project_name} DESTINATION bin)
     elif args.type == "module":
         # Create hello.c (kernel module)
         hello_c = sw_dir / f"{project_name}.c"
+        c_project_name = project_name.replace("-", "_")
         with open(hello_c, "w") as f:
             f.write(f"""#include <linux/module.h>
 #include <linux/kernel.h>
@@ -145,19 +146,19 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Yocto Workspace");
 MODULE_DESCRIPTION("A simple {project_name} kernel module");
 
-static int __init {project_name}_init(void)
+static int __init {c_project_name}_init(void)
 {{
     printk(KERN_INFO "Hello from {project_name} module!\\n");
     return 0;
 }}
 
-static void __exit {project_name}_cleanup(void)
+static void __exit {c_project_name}_cleanup(void)
 {{
     printk(KERN_INFO "Goodbye from {project_name} module!\\n");
 }}
 
-module_init({project_name}_init);
-module_exit({project_name}_cleanup);
+module_init({c_project_name}_init);
+module_exit({c_project_name}_cleanup);
 """)
 
         # Create Makefile

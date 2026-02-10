@@ -8,20 +8,58 @@ from pathlib import Path
 
 # Add scripts directory to path to import yocto_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from yocto_utils import (
-        UI,
-        run_command,
-        get_bitbake_yocto_dir,
-        find_custom_layer,
-        get_all_custom_layers,
-        set_cached_layer,
-        get_cached_layer,
-        get_cached_image,
-        find_image_recipes,
-        add_package_to_image,
-        set_cached_image,
-        sanitize_yocto_name
-    )
+from yocto_utils import (
+    UI,
+    run_command,
+    get_bitbake_yocto_dir,
+    find_custom_layer,
+    get_all_custom_layers,
+    set_cached_layer,
+    get_cached_layer,
+    get_cached_image,
+    find_image_recipes,
+    add_package_to_image,
+    set_cached_image,
+    sanitize_yocto_name
+)
+
+try:
+    from sync_deps import detect_dependencies
+except ImportError:
+    def detect_dependencies(project_dir, workspace_root, layer_dir):
+        return []
+
+def detect_rust_dependencies(project_dir):
+    # Placeholder
+    return []
+
+def detect_go_dependencies(project_dir):
+    # Placeholder
+    return None
+
+def detect_python_dependencies(project_dir):
+    # Placeholder
+    return []
+
+def main():
+    parser = argparse.ArgumentParser(description="Add a new package/project to Yocto")
+    parser.add_argument("project_path", help="Path to project directory or name")
+    parser.add_argument("--url", help="Git URL for submodule")
+    parser.add_argument("--layer", "-l", help="Target layer")
+    parser.add_argument("--type", "-t", choices=["auto", "cpp", "cmake", "autotools", "makefile", "module", "rust", "go", "python"], default="auto", help="Project type")
+    parser.add_argument("--pv", default="0.1", help="Version")
+    parser.add_argument("--recipe-dir", default="recipes-apps", help="Recipe subdirectory")
+    # Image Integration Arguments
+    img_group = parser.add_mutually_exclusive_group()
+    img_group.add_argument("--add-to-image", action="store_true", default=None, help="Add to image (default: auto-detect)")
+    img_group.add_argument("--no-add-to-image", action="store_false", dest="add_to_image", help="Don't add to image")
+    
+    parser.add_argument("--library", action="store_true", help="Is library")
+    parser.add_argument("--image", "-i", help="Target image")
+    
+    args = parser.parse_args()
+    
+    workspace_root = Path(__file__).resolve().parent.parent
 
     if args.url:
         UI.print_item("Git URL", args.url)
@@ -105,7 +143,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     UI.print_item("Project Type", project_type)
     
     # Define paths
-    workspace_root = Path(__file__).resolve().parent.parent
     layer_dir = workspace_root / "yocto" / "layers" / layer_name
     recipe_dir = layer_dir / recipe_subdir / project_name
     recipe_file = recipe_dir / f"{project_name}_{args.pv}.bb"
@@ -114,7 +151,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     recipe_dir.mkdir(parents=True, exist_ok=True)
 
     # Calculate relative path from recipe directory to project directory
-    rel_project_path = os.path.relpath(project_dir, recipe_dir)
+    try:
+        rel_project_path = os.path.relpath(project_dir, recipe_dir)
+    except ValueError:
+        # Fallback for paths on different drives or odd configs
+        rel_project_path = str(project_dir)
 
     # Detect dependencies based on project type
     detected_deps = []
@@ -157,6 +198,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     depends_str = ""
     if detected_deps:
         depends_str = f'DEPENDS = "{" ".join(detected_deps)}"'
+
+    # Initialize pn_override
+    pn_override = ""
 
     # Recipe Content
     if project_type in ["cpp", "cmake", "autotools"]:
@@ -272,6 +316,26 @@ do_compile[network] = "1"
 # Use local source code directly
 inherit externalsrc
 EXTERNALSRC = "${{THISDIR}}/{rel_project_path}"
+
+{depends_str}
+"""
+    # Default fallback for makefile or unknown
+    else: 
+         recipe_content = f"""SUMMARY = "{project_name} application"
+{license_text}
+
+# Use local source code directly
+inherit externalsrc
+EXTERNALSRC = "${{THISDIR}}/{rel_project_path}"
+
+do_compile() {{
+    oe_runmake
+}}
+
+do_install() {{
+    install -d ${{D}}${{bindir}}
+    install -m 0755 {project_name} ${{D}}${{bindir}}
+}}
 
 {depends_str}
 """

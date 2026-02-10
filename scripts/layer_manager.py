@@ -222,6 +222,17 @@ def sync_layers(workspace_root, layers_base):
         print(f"  Please source the environment first (e.g., 'source scripts/env_init.sh')")
         return
 
+
+
+    # Check for specific configuration conflict (MACHINE set in local.conf + fragment enabled)
+    if "is used while MACHINE has already got an assignment" in check_layers:
+        UI.print_error("Configuration Conflict Detected")
+        print("  The MACHINE is set in local.conf but a configuration fragment is also enabled.")
+        print(f"\n  {UI.BOLD}To fix this, run:{UI.NC}")
+        print(f"    {UI.GREEN}yocto-machine switch <machine-name>{UI.NC}")
+        print("  (This will automatically resolve the conflict)")
+        return
+
     active_layers = check_layers.splitlines()
     
     build_dir = get_bitbake_yocto_dir(workspace_root) / "build"

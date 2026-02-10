@@ -1,7 +1,5 @@
-SUMMARY = "legs_main application"
+SUMMARY = "legs-main application"
 LICENSE = "CLOSED"
-PN = "legs-main"
-PV = "1.0"
 
 inherit cmake
 
