@@ -21,6 +21,7 @@ try:
     import update_image
     import yocto_distro
     import yocto_init_manager
+    import yocto_service
     from yocto_layer_index import LayerIndex, DEFAULT_BRANCH
     from yocto_utils import get_yocto_branch
 except ImportError:
@@ -30,6 +31,7 @@ except ImportError:
     update_image = None
     yocto_distro = None
     yocto_init_manager = None
+    yocto_service = None
     LayerIndex = None
     DEFAULT_BRANCH = "master"
     get_yocto_branch = lambda x: DEFAULT_BRANCH
@@ -248,6 +250,7 @@ class YoctoMenuApp:
             MenuItem("Add Existing Project", self.action_add_project, "Add an existing project to the workspace"),
             MenuItem("Sync Project Deps", f"python3 {SCRIPTS_DIR}/sync_deps.py", "Sync CMake dependencies with Yocto recipes"),
             MenuItem("Live Edit Recipe", self.action_live_edit, "Edit a recipe in the workspace"),
+            MenuItem("Manage Services", self.action_manage_services, "Enable/Disable auto-start for apps/modules"),
             MenuItem("Back", self.go_back, "Return to main menu")
         ])
         
@@ -742,6 +745,48 @@ class YoctoMenuApp:
              self.enter_menu(menu)
         except Exception as e:
              self.show_message(f"Error listing recipes: {e}")
+
+    def action_manage_services(self):
+        """Manage auto-start services/modules."""
+        name = self.get_input("Enter recipe name (e.g. gps-sim):")
+        if not name:
+             return
+             
+        # Find recipe first to get status
+        # We can reuse yocto_service.find_recipe logic if we imported it
+        # But for menu, let's just use the CLI wrapper or direct call
+        
+        # Checking status
+        try:
+             recipe_path = yocto_service.find_recipe(self.workspace_root, name)
+             if not recipe_path:
+                 self.show_message(f"Recipe '{name}' not found.")
+                 return
+                 
+             status = yocto_service.get_status(recipe_path, name)
+             
+             # Show options
+             options = []
+             if "Enabled" in status:
+                  options.append("Disable")
+             else:
+                  options.append("Enable")
+                  
+             def _handle_service_action(action):
+                  if action == "Enable":
+                       success, msg = yocto_service.enable_service(recipe_path, name)
+                  else:
+                       success, msg = yocto_service.disable_service(recipe_path, name)
+                       
+                  if success:
+                       self.show_message(f"Success: {msg}")
+                  else:
+                       self.show_message(f"Subprocess Error: {msg}")
+
+             self.show_selection_menu(f"Manage Service: {name} ({status})", options, _handle_service_action)
+
+        except Exception as e:
+             self.show_message(f"Error: {e}")
 
     def _perform_edit(self, layer_path, recipe_file):
         # Find full path again

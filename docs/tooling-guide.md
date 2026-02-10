@@ -323,6 +323,13 @@ yocto-new my-driver --type module --layer falcon
 yocto-add spdlog --url https://github.com/gabime/spdlog.git --type cmake --library
 ```
 
+### Managing Auto-Load
+To ensure your kernel module loads automatically on boot, use `yocto-service`:
+```bash
+yocto-service enable gps-sim
+```
+This adds `KERNEL_MODULE_AUTOLOAD` to the recipe. You can check status with `yocto-service status gps-sim`.
+
 ### Build Configuration
 
 Kernel modules use a special build configuration to keep source directories clean:

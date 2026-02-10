@@ -27,3 +27,6 @@ do_configure:prepend() {
 
 
 # Kernel modules need to be installed in specific way if strict
+
+# Autoload module on boot
+KERNEL_MODULE_AUTOLOAD += "gps-sim"
