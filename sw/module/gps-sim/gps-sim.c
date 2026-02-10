@@ -1,6 +1,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/random.h>
 #include <linux/serial.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -26,20 +27,98 @@ static struct tty_driver *gps_tty_driver;
 static struct tty_port gps_tty_port;
 static struct timer_list gps_timer;
 
+/* State for simulation */
+static int gps_hour = 12;
+static int gps_min = 35;
+static int gps_sec = 19;
+
+/*
+ * Base coordinates:
+ * Lat: -35.315075 -> 35 degrees, 18.9045 minutes South
+ * Lon: 149.129404 -> 149 degrees, 07.7642 minutes East
+ */
+static int lat_deg = 35;
+static int lat_min_int = 18;
+static int lat_min_frac = 9045; /* .9045 */
+
+static int lon_deg = 149;
+static int lon_min_int = 7;
+static int lon_min_frac = 7642; /* .7642 */
+
 /*
  * We need a way to pass data to the tty layer.
  * In a real device, an interrupt would trigger this.
  * Here, we use a timer.
  */
 
+static unsigned char nmea_checksum(const char *s) {
+  unsigned char c = 0;
+  while (*s)
+    c ^= *s++;
+  return c;
+}
+
 static void gps_simulate_nmea(struct timer_list *t) {
   struct tty_struct *tty;
   struct tty_port *port = &gps_tty_port;
-  char nmea_sentence[] =
-      "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n";
-  int len = strlen(nmea_sentence);
+  char nmea_sentence[128];
+  char content[100];
+  int len;
   int space;
   unsigned char *p;
+  u32 jitter;
+
+  /* Update time */
+  gps_sec++;
+  if (gps_sec >= 60) {
+    gps_sec = 0;
+    gps_min++;
+    if (gps_min >= 60) {
+      gps_min = 0;
+      gps_hour++;
+      if (gps_hour >= 24)
+        gps_hour = 0;
+    }
+  }
+
+  /* Add jitter to fractional minutes
+   * +/- small random amount to simulate noise
+   */
+  jitter = get_random_u32() % 20; /* 0..19 */
+  if (get_random_u32() % 2)
+    lat_min_frac += jitter;
+  else
+    lat_min_frac -= jitter;
+
+  jitter = get_random_u32() % 20;
+  if (get_random_u32() % 2)
+    lon_min_frac += jitter;
+  else
+    lon_min_frac -= jitter;
+
+  /* Constrain fractional part to reasonable bounds (0000-9999) mostly */
+  if (lat_min_frac < 0)
+    lat_min_frac = 0;
+  if (lat_min_frac > 9999)
+    lat_min_frac = 9999;
+  if (lon_min_frac < 0)
+    lon_min_frac = 0;
+  if (lon_min_frac > 9999)
+    lon_min_frac = 9999;
+
+  /* Format content without $ and *CS */
+  snprintf(
+      content, sizeof(content),
+      "GPGGA,%02d%02d%02d,%02d%02d.%04d,S,%03d%02d.%04d,E,1,08,0.9,545.4,M,"
+      "46.9,M,,",
+      gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac, lon_deg,
+      lon_min_int, lon_min_frac);
+
+  /* Calculate checksum */
+  snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content,
+           nmea_checksum(content));
+
+  len = strlen(nmea_sentence);
 
   tty = tty_port_tty_get(port);
   if (tty) {
