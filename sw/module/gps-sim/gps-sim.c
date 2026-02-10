@@ -65,6 +65,20 @@ static int signal_loss = 0;
 module_param(signal_loss, int, 0644);
 MODULE_PARM_DESC(signal_loss, "Simulate signal loss (0=Good, 1=Lost)");
 
+struct gps_sat {
+  int prn;
+  int elev;
+  int az;
+  int snr;
+};
+
+/* Virtual constellation */
+static struct gps_sat sats[] = {
+    {1, 45, 120, 30},  {3, 60, 210, 35}, {6, 30, 45, 25},   {9, 15, 300, 20},
+    {12, 70, 180, 40}, {17, 25, 90, 28}, {22, 10, 270, 15}, {28, 50, 330, 32},
+};
+#define NUM_SATS (sizeof(sats) / sizeof(sats[0]))
+
 static void update_coordinates_from_param(void) {
   int abs_lat, abs_lon;
   int min_part;
@@ -227,6 +241,68 @@ static void gps_simulate_nmea(struct timer_list *t) {
     if (space >= len) {
       memcpy(p, nmea_sentence, len);
       tty_flip_buffer_push(port);
+    }
+
+    /* Format GNGSA content */
+    /* $GNGSA,mode,fix_type,prn1...prn12,pdop,hdop,vdop*cs */
+    /* Mode A (Auto), Fix 3 (3D), PRNs 1,3,6,12,17,28 (Active) */
+    snprintf(content, sizeof(content),
+             "GNGSA,A,%d,01,03,06,12,17,28,,,,,,,1.5,1.0,1.2",
+             (signal_loss ? 1 : 3));
+
+    cs = nmea_checksum(content);
+    if ((get_random_u32() % 100) < error_rate)
+      cs++;
+
+    snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content, cs);
+    len = strlen(nmea_sentence);
+
+    /* Push GNGSA */
+    space = tty_prepare_flip_string(port, &p, len);
+    if (space >= len) {
+      memcpy(p, nmea_sentence, len);
+      tty_flip_buffer_push(port);
+    }
+
+    /* Format GNGSV messages (2 messages for 8 sats) */
+    /* $GNGSV,num_msgs,msg_num,num_sats,prn,elev,az,snr,...*cs */
+    int msg;
+    for (msg = 0; msg < 2; msg++) {
+      int sat_start = msg * 4;
+      /* Add some jitter to SNR */
+      int snr0 = (sats[sat_start].snr + (get_random_u32() % 5)) *
+                 (signal_loss ? 0 : 1);
+      int snr1 = (sats[sat_start + 1].snr + (get_random_u32() % 5)) *
+                 (signal_loss ? 0 : 1);
+      int snr2 = (sats[sat_start + 2].snr + (get_random_u32() % 5)) *
+                 (signal_loss ? 0 : 1);
+      int snr3 = (sats[sat_start + 3].snr + (get_random_u32() % 5)) *
+                 (signal_loss ? 0 : 1);
+
+      snprintf(content, sizeof(content),
+               "GNGSV,2,%d,08,%02d,%02d,%03d,%02d,%02d,%02d,%03d,%02d,%02d,%"
+               "02d,%03d,%02d,%02d,%02d,%03d,%02d",
+               msg + 1, sats[sat_start].prn, sats[sat_start].elev,
+               sats[sat_start].az, snr0, sats[sat_start + 1].prn,
+               sats[sat_start + 1].elev, sats[sat_start + 1].az, snr1,
+               sats[sat_start + 2].prn, sats[sat_start + 2].elev,
+               sats[sat_start + 2].az, snr2, sats[sat_start + 3].prn,
+               sats[sat_start + 3].elev, sats[sat_start + 3].az, snr3);
+
+      cs = nmea_checksum(content);
+      if ((get_random_u32() % 100) < error_rate)
+        cs++;
+
+      snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content,
+               cs);
+      len = strlen(nmea_sentence);
+
+      /* Push GNGSV frame */
+      space = tty_prepare_flip_string(port, &p, len);
+      if (space >= len) {
+        memcpy(p, nmea_sentence, len);
+        tty_flip_buffer_push(port);
+      }
     }
 
     tty_kref_put(tty);
