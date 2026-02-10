@@ -52,10 +52,18 @@ static int lon_min_frac = 7642; /* .7642 */
 static int start_lat = -35315075;
 static int start_lon = 149129404;
 
-module_param(start_lat, int, 0444);
+module_param(start_lat, int, 0644);
 MODULE_PARM_DESC(start_lat, "Starting Latitude in micro-degrees");
-module_param(start_lon, int, 0444);
+module_param(start_lon, int, 0644);
 MODULE_PARM_DESC(start_lon, "Starting Longitude in micro-degrees");
+
+static int error_rate = 0;
+module_param(error_rate, int, 0644);
+MODULE_PARM_DESC(error_rate, "Error rate (0-100%) for checksum corruption");
+
+static int signal_loss = 0;
+module_param(signal_loss, int, 0644);
+MODULE_PARM_DESC(signal_loss, "Simulate signal loss (0=Good, 1=Lost)");
 
 static void update_coordinates_from_param(void) {
   int abs_lat, abs_lon;
@@ -96,6 +104,10 @@ static void gps_simulate_nmea(struct timer_list *t) {
   int space;
   unsigned char *p;
   u32 jitter;
+  unsigned char cs;
+
+  /* Re-calculate coordinates from parameters to support runtime updates */
+  update_coordinates_from_param();
 
   /* Update time */
   gps_sec++;
@@ -144,9 +156,28 @@ static void gps_simulate_nmea(struct timer_list *t) {
       (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
       (start_lon < 0) ? 'W' : 'E');
 
+  /* Handle Signal Loss */
+  if (signal_loss) {
+    /* Replace '1' (Fix valid) with '0' (Invalid) */
+    /* GNGGA format: ... frac,N,deg,min,frac,E,1, ... */
+    /* We know where the fix quality digit is relative to the end, but easier to
+     * just regenerate with 0 if needed or modify string */
+    /* Actually, let's just regenerate properly based on signal_loss */
+    snprintf(
+        content, sizeof(content),
+        "GNGGA,%02d%02d%02d,%02d%02d.%04d,%c,%03d%02d.%04d,%c,%d,08,0.9,545.4,"
+        "M,46.9,M,,",
+        gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac,
+        (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
+        (start_lon < 0) ? 'W' : 'E', (signal_loss ? 0 : 1));
+  }
+
   /* Calculate checksum and format sentence */
-  snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content,
-           nmea_checksum(content));
+  cs = nmea_checksum(content);
+  if ((get_random_u32() % 100) < error_rate)
+    cs++; /* Corrupt checksum */
+
+  snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content, cs);
 
   len = strlen(nmea_sentence);
 
@@ -170,8 +201,25 @@ static void gps_simulate_nmea(struct timer_list *t) {
              (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
              (start_lon < 0) ? 'W' : 'E');
 
-    snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content,
-             nmea_checksum(content));
+    /* Handle Signal Loss for RMC */
+    if (signal_loss) {
+      /* Replace Status 'A' with 'V' */
+      /* GNRMC,time,A,... */
+      /* Regenerate for simplicity */
+      snprintf(
+          content, sizeof(content),
+          "GNRMC,%02d%02d%02d,%c,%02d%02d.%04d,%c,%03d%02d.%04d,%c,0.5,0.0,"
+          "100226,,,A",
+          gps_hour, gps_min, gps_sec, (signal_loss ? 'V' : 'A'), lat_deg,
+          lat_min_int, lat_min_frac, (start_lat < 0) ? 'S' : 'N', lon_deg,
+          lon_min_int, lon_min_frac, (start_lon < 0) ? 'W' : 'E');
+    }
+
+    cs = nmea_checksum(content);
+    if ((get_random_u32() % 100) < error_rate)
+      cs++;
+
+    snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content, cs);
     len = strlen(nmea_sentence);
 
     /* Push GNRMC */
@@ -230,6 +278,8 @@ static int __init gps_sim_init(void) {
   int retval;
 
   /* Initialize coordinates from module parameters */
+  /* Initial update not strictly needed as loop does it, but good for
+   * cleanliness */
   update_coordinates_from_param();
 
   /* Allocate the tty driver */
