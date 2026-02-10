@@ -1,6 +1,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/random.h>
 #include <linux/serial.h>
 #include <linux/slab.h>
@@ -44,6 +45,34 @@ static int lat_min_frac = 9045; /* .9045 */
 static int lon_deg = 149;
 static int lon_min_int = 7;
 static int lon_min_frac = 7642; /* .7642 */
+
+/* Module parameters for start location (in degrees * 1000000)
+ * Example: -35.315075 -> -35315075
+ */
+static int start_lat = -35315075;
+static int start_lon = 149129404;
+
+module_param(start_lat, int, 0444);
+MODULE_PARM_DESC(start_lat, "Starting Latitude in micro-degrees");
+module_param(start_lon, int, 0444);
+MODULE_PARM_DESC(start_lon, "Starting Longitude in micro-degrees");
+
+static void update_coordinates_from_param(void) {
+  int abs_lat, abs_lon;
+  int min_part;
+
+  abs_lat = (start_lat < 0) ? -start_lat : start_lat;
+  lat_deg = abs_lat / 1000000;
+  min_part = (abs_lat % 1000000) * 60;
+  lat_min_int = min_part / 1000000;
+  lat_min_frac = (min_part % 1000000) / 100; /* Keep 4 decimal places */
+
+  abs_lon = (start_lon < 0) ? -start_lon : start_lon;
+  lon_deg = abs_lon / 1000000;
+  min_part = (abs_lon % 1000000) * 60;
+  lon_min_int = min_part / 1000000;
+  lon_min_frac = (min_part % 1000000) / 100;
+}
 
 /*
  * We need a way to pass data to the tty layer.
@@ -106,15 +135,16 @@ static void gps_simulate_nmea(struct timer_list *t) {
   if (lon_min_frac > 9999)
     lon_min_frac = 9999;
 
-  /* Format content without $ and *CS */
+  /* Format GNGGA content */
   snprintf(
       content, sizeof(content),
-      "GPGGA,%02d%02d%02d,%02d%02d.%04d,S,%03d%02d.%04d,E,1,08,0.9,545.4,M,"
-      "46.9,M,,",
-      gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac, lon_deg,
-      lon_min_int, lon_min_frac);
+      "GNGGA,%02d%02d%02d,%02d%02d.%04d,%c,%03d%02d.%04d,%c,1,08,0.9,545.4,"
+      "M,46.9,M,,",
+      gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac,
+      (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
+      (start_lon < 0) ? 'W' : 'E');
 
-  /* Calculate checksum */
+  /* Calculate checksum and format sentence */
   snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content,
            nmea_checksum(content));
 
@@ -122,12 +152,35 @@ static void gps_simulate_nmea(struct timer_list *t) {
 
   tty = tty_port_tty_get(port);
   if (tty) {
-    /* Push data to the TTY flip buffer */
+    /* Push GNGGA */
     space = tty_prepare_flip_string(port, &p, len);
     if (space >= len) {
       memcpy(p, nmea_sentence, len);
       tty_flip_buffer_push(port);
     }
+
+    /* Format GNRMC content */
+    /* $GNRMC,hhmmss.ss,A,ddmm.mmmm,N,dddmm.mmmm,E,speed,course,ddmmyy,,,mode*cs
+     */
+    /* Using dummy date 100226 (10th Feb 2026), dummy speed/course */
+    snprintf(content, sizeof(content),
+             "GNRMC,%02d%02d%02d,A,%02d%02d.%04d,%c,%03d%02d.%04d,%c,0.5,0.0,"
+             "100226,,,A",
+             gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac,
+             (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
+             (start_lon < 0) ? 'W' : 'E');
+
+    snprintf(nmea_sentence, sizeof(nmea_sentence), "$%s*%02X\r\n", content,
+             nmea_checksum(content));
+    len = strlen(nmea_sentence);
+
+    /* Push GNRMC */
+    space = tty_prepare_flip_string(port, &p, len);
+    if (space >= len) {
+      memcpy(p, nmea_sentence, len);
+      tty_flip_buffer_push(port);
+    }
+
     tty_kref_put(tty);
   }
 
@@ -175,6 +228,9 @@ static const struct tty_port_operations gps_port_ops = {};
 
 static int __init gps_sim_init(void) {
   int retval;
+
+  /* Initialize coordinates from module parameters */
+  update_coordinates_from_param();
 
   /* Allocate the tty driver */
   gps_tty_driver = tty_alloc_driver(GPS_TTY_MINORS, TTY_DRIVER_REAL_RAW |
