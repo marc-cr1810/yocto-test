@@ -3,9 +3,11 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/random.h>
+#include <linux/rtc.h>
 #include <linux/serial.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/time.h>
 #include <linux/timer.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -29,9 +31,8 @@ static struct tty_port gps_tty_port;
 static struct timer_list gps_timer;
 
 /* State for simulation */
-static int gps_hour = 12;
-static int gps_min = 35;
-static int gps_sec = 19;
+/* State for simulation */
+/* Using system time for gps_hour, gps_min, gps_sec */
 
 /*
  * Base coordinates:
@@ -123,18 +124,10 @@ static void gps_simulate_nmea(struct timer_list *t) {
   /* Re-calculate coordinates from parameters to support runtime updates */
   update_coordinates_from_param();
 
-  /* Update time */
-  gps_sec++;
-  if (gps_sec >= 60) {
-    gps_sec = 0;
-    gps_min++;
-    if (gps_min >= 60) {
-      gps_min = 0;
-      gps_hour++;
-      if (gps_hour >= 24)
-        gps_hour = 0;
-    }
-  }
+  /* Update time using system time */
+  struct rtc_time tm;
+  time64_t now = ktime_get_real_seconds();
+  rtc_time64_to_tm(now, &tm);
 
   /* Add jitter to fractional minutes
    * +/- small random amount to simulate noise
@@ -166,7 +159,7 @@ static void gps_simulate_nmea(struct timer_list *t) {
       content, sizeof(content),
       "GNGGA,%02d%02d%02d,%02d%02d.%04d,%c,%03d%02d.%04d,%c,1,08,0.9,545.4,"
       "M,46.9,M,,",
-      gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac,
+      tm.tm_hour, tm.tm_min, tm.tm_sec, lat_deg, lat_min_int, lat_min_frac,
       (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
       (start_lon < 0) ? 'W' : 'E');
 
@@ -181,7 +174,7 @@ static void gps_simulate_nmea(struct timer_list *t) {
         content, sizeof(content),
         "GNGGA,%02d%02d%02d,%02d%02d.%04d,%c,%03d%02d.%04d,%c,%d,08,0.9,545.4,"
         "M,46.9,M,,",
-        gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac,
+        tm.tm_hour, tm.tm_min, tm.tm_sec, lat_deg, lat_min_int, lat_min_frac,
         (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
         (start_lon < 0) ? 'W' : 'E', (signal_loss ? 0 : 1));
   }
@@ -207,13 +200,13 @@ static void gps_simulate_nmea(struct timer_list *t) {
     /* Format GNRMC content */
     /* $GNRMC,hhmmss.ss,A,ddmm.mmmm,N,dddmm.mmmm,E,speed,course,ddmmyy,,,mode*cs
      */
-    /* Using dummy date 100226 (10th Feb 2026), dummy speed/course */
     snprintf(content, sizeof(content),
              "GNRMC,%02d%02d%02d,A,%02d%02d.%04d,%c,%03d%02d.%04d,%c,0.5,0.0,"
-             "100226,,,A",
-             gps_hour, gps_min, gps_sec, lat_deg, lat_min_int, lat_min_frac,
-             (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int, lon_min_frac,
-             (start_lon < 0) ? 'W' : 'E');
+             "%02d%02d%02d,,,A",
+             tm.tm_hour, tm.tm_min, tm.tm_sec, lat_deg, lat_min_int,
+             lat_min_frac, (start_lat < 0) ? 'S' : 'N', lon_deg, lon_min_int,
+             lon_min_frac, (start_lon < 0) ? 'W' : 'E', tm.tm_mday,
+             tm.tm_mon + 1, tm.tm_year % 100);
 
     /* Handle Signal Loss for RMC */
     if (signal_loss) {
@@ -223,10 +216,11 @@ static void gps_simulate_nmea(struct timer_list *t) {
       snprintf(
           content, sizeof(content),
           "GNRMC,%02d%02d%02d,%c,%02d%02d.%04d,%c,%03d%02d.%04d,%c,0.5,0.0,"
-          "100226,,,A",
-          gps_hour, gps_min, gps_sec, (signal_loss ? 'V' : 'A'), lat_deg,
+          "%02d%02d%02d,,,A",
+          tm.tm_hour, tm.tm_min, tm.tm_sec, (signal_loss ? 'V' : 'A'), lat_deg,
           lat_min_int, lat_min_frac, (start_lat < 0) ? 'S' : 'N', lon_deg,
-          lon_min_int, lon_min_frac, (start_lon < 0) ? 'W' : 'E');
+          lon_min_int, lon_min_frac, (start_lon < 0) ? 'W' : 'E', tm.tm_mday,
+          tm.tm_mon + 1, tm.tm_year % 100);
     }
 
     cs = nmea_checksum(content);
