@@ -9,6 +9,7 @@
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
 #include <linux/uaccess.h>
+#include <linux/version.h>
 
 #define DRIVER_VERSION "v1.0"
 #define DRIVER_AUTHOR "Yocto Workspace"
@@ -91,6 +92,8 @@ static const struct tty_operations gps_ops = {
     .write_room = gps_tty_write_room,
 };
 
+static const struct tty_port_operations gps_port_ops = {};
+
 static int __init gps_sim_init(void) {
   int retval;
 
@@ -114,6 +117,7 @@ static int __init gps_sim_init(void) {
 
   /* Initialize the tty port */
   tty_port_init(&gps_tty_port);
+  gps_tty_port.ops = &gps_port_ops;
   /* Link port to driver so tty_port_open works */
   tty_port_link_device(&gps_tty_port, gps_tty_driver, 0);
 
@@ -142,7 +146,11 @@ err_driver:
 }
 
 static void __exit gps_sim_cleanup(void) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+  timer_shutdown_sync(&gps_timer);
+#else
   del_timer_sync(&gps_timer);
+#endif
 
   tty_unregister_device(gps_tty_driver, 0);
   tty_unregister_driver(gps_tty_driver);

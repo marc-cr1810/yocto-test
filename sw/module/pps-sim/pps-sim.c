@@ -134,8 +134,14 @@ static int __init pps_sim_init(void) {
   return 0;
 }
 
+#include <linux/version.h>
+
 static void __exit pps_sim_cleanup(void) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+  timer_shutdown_sync(&pps_timer);
+#else
   del_timer_sync(&pps_timer);
+#endif
   device_destroy(pps_class, dev_num);
   class_destroy(pps_class);
   cdev_del(&pps_cdev);
